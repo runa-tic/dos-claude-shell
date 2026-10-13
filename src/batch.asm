@@ -28,6 +28,11 @@ endstruc
 ; [cmd_start, tok_end) the name it was given as. Run it from its first
 ; line: in place of the running one, or after saving it if this is a CALL.
 start_batch:
+        cmp     byte [no_batch], 0      ; not as one of Claude's actions
+        je      .allowed
+        mov     si, msg_no_batch
+        jmp     print_err
+.allowed:
         cmp     byte [this_call], 0
         je      .replace
         cmp     byte [batch_active], 0

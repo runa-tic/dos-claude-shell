@@ -1,7 +1,7 @@
 ; ============================================================
 ; CLAUDE.COM - a shell for DOS that talks to Claude.
 ;
-; Phase 6: a DOS shell that talks to Claude. It reads a line, runs the program the
+; Phase 7: a DOS shell that talks to Claude, who can act in it. It reads a line, runs the program the
 ; line names (a .COM, an .EXE or a batch file, looked for in the
 ; current directory and then along PATH), handles Ctrl-C and
 ; critical errors, and can be the system shell (SHELL= in
@@ -30,7 +30,9 @@
 ; use < > >> and | (redir.asm). NET, PING and FETCH use its own
 ; TCP/IP (net.asm, tcp.asm) through a packet driver. ASK, and any
 ; line typed at the prompt that is not a command, goes to Claude
-; (chat.asm, json.asm) through the Messages API.
+; (chat.asm, json.asm) through the Messages API. Claude can run
+; commands and write files, each change allowed by the user first
+; (tools.asm).
 ;
 ; 386 real mode: 32-bit registers are allowed, but DOS and BIOS
 ; calls only promise to keep the low 16 bits of each register.
@@ -482,7 +484,10 @@ internals:
         dw      0
 
 cmd_exit:
+        cmp     byte [in_turn], 0       ; not as one of Claude's actions
+        jne     .no
         jmp     do_exit
+.no:    ret
 
 cmd_rem:
         ret
@@ -800,6 +805,9 @@ restart:
         call    net_close
         call    http_free
         call    first_fit
+        call    capture_stop            ; one of Claude's actions cut short
+        mov     byte [in_turn], 0
+        mov     byte [no_batch], 0
         mov     dx, dta
         mov     ah, 1Ah
         int     21h
@@ -1090,7 +1098,7 @@ banner:
 ; Data
 ; ------------------------------------------------------------
 
-msg_banner      db 'Claude shell for DOS - phase 6 (386 real mode)', 13, 10
+msg_banner      db 'Claude shell for DOS - phase 7 (386 real mode)', 13, 10
                 db 'DOS ', 0
 msg_banner_name db 'Claude shell for DOS', 0
 msg_oem         db ', OEM ', 0

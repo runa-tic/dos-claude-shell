@@ -23,6 +23,11 @@ MAX_STEPS       equ 8           ; requests in one turn (tools: phase 7)
 
 ; ASK question: the rest of the line to Claude.
 cmd_ask:
+        cmp     byte [in_turn], 0       ; the network is Claude's for now
+        je      .free_to_go
+        mov     si, msg_busy
+        jmp     print_err
+.free_to_go:
         call    skip_blanks
         cmp     byte [si], 0
         je      required_missing
@@ -50,6 +55,12 @@ claude_ready:
 ; claude_turn: the line at SI to Claude, and the answer printed.
 claude_turn:
         mov     [turn_text], si
+        cmp     byte [in_turn], 0       ; not from inside one of Claude's actions
+        je      .not_busy
+        mov     si, msg_busy
+        jmp     print_err
+.not_busy:
+        mov     byte [from_keyboard], 0
         call    claude_ready
         jnc     .configured
         mov     si, msg_no_cfg
@@ -58,6 +69,9 @@ claude_turn:
         mov     si, cfg_url
         call    parse_url
         jc      .done
+        mov     byte [in_turn], 1
+        mov     word [res_len], RES_AT
+        mov     byte [results_started], 0
         call    load_key
         call    last_fit                ; big blocks from the top of memory
         cmp     word [hist_seg], 0
@@ -131,6 +145,7 @@ claude_turn:
         call    net_close
 .free:  call    http_free
 .forget_key:
+        mov     byte [in_turn], 0
         call    first_fit
         mov     di, api_key             ; it is not kept between turns
         mov     cx, KEY_MAX
@@ -507,6 +522,7 @@ read_answer:
         jmp     .block
 .blocks_done:
         call    tools_done              ; their results into the conversation
+        jc      .too_long
         pop     es
         clc
         ret
@@ -649,7 +665,11 @@ system_prompt:
         db 'assembly that replaces COMMAND.COM and reaches you over its own TCP/IP stack. '
         db 'The user typed this at its prompt: a question, or a line that is not a DOS command. '
         db 'Answer directly in plain ASCII for an 80-column text screen: brief, no Markdown, '
-        db 'no emoji, no tables. Do not imitate a DOS prompt or invent command output.', 0
+        db 'no emoji, no tables. Do not imitate a DOS prompt or invent command output. '
+        db 'When the question is about this machine, its files, programs or settings, or the '
+        db 'user asks you to do something, use the run and write_file actions instead of '
+        db 'guessing or telling the user what to type. The user sees every command you run '
+        db 'and what it printed, so do not repeat that output: say what it means.', 0
 
         section .bss
                 alignb 2

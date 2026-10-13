@@ -37,7 +37,7 @@ NETFILES = $(PKG)/DRIVERS/CRYNWR/NE2000.COM=NET/NE2000.COM \
            $(PKG)/NET/mTCP/nc.exe=NET/NC.EXE
 
 .PHONY: all fetch freedos run nettest shelltest childtest cmdtest msdos run-msdos nettest-msdos \
-        shelltest-msdos childtest-msdos cmdtest-msdos roottest rootnet roottest-msdos rootnet-msdos net5test net5test-msdos asktest asktest-msdos asktype dbx nettest-dbx childtest-dbx cmdtest-dbx net5test-dbx clean
+        shelltest-msdos childtest-msdos cmdtest-msdos roottest rootnet roottest-msdos rootnet-msdos net5test net5test-msdos asktest asktest-msdos asktype tooltest tooltest-msdos dbx nettest-dbx childtest-dbx cmdtest-dbx net5test-dbx clean
 
 all: $(SHELL_COM)
 
@@ -206,6 +206,23 @@ in about 70 words, what is a packet driver{ret}
 asktype: $(BUILD)/freedos.img
 	$(MKIMAGE) $(BUILD)/freedos-test.img $< image/freedos/fdconfig-root.sys=FDCONFIG.SYS $(CLAUDE_FILES)
 	$(BOOT) $(BUILD)/freedos-test.img --timeout 60 --boot-wait 8 --keys '$(ASK_KEYS)' --screen
+
+# Phase 7, typed at the prompt: Claude looks (DIR, no question asked), writes a file
+# (allowed with Y), and tries to delete it (refused with N). A screen after each.
+W20 = {wait}{wait}{wait}{wait}{wait}{wait}{wait}{wait}{wait}{wait}{wait}{wait}{wait}{wait}{wait}{wait}{wait}{wait}{wait}{wait}
+W25 = {wait}{wait}{wait}{wait}{wait}{wait}{wait}{wait}{wait}{wait}{wait}{wait}{wait}{wait}{wait}{wait}{wait}{wait}{wait}{wait}{wait}{wait}{wait}{wait}{wait}
+TOOL_KEYS = which files are in the root directory{ret}$(W25){screen}cls{ret}\
+create a file NOTE.TXT that says hello from claude{ret}$(W20)y$(W25){screen}cls{ret}\
+delete NOTE.TXT{ret}$(W20)n$(W25)
+tooltest: $(BUILD)/freedos.img
+	$(MKIMAGE) $(BUILD)/freedos-test.img $< image/freedos/fdconfig-root.sys=FDCONFIG.SYS $(CLAUDE_FILES)
+	$(BOOT) $(BUILD)/freedos-test.img --timeout 200 --boot-wait 8 --keys '$(TOOL_KEYS)' --screen
+	@echo "[tooltest] NOTE.TXT on the disk afterwards:"; mtype -i $(BUILD)/freedos-test.img@@32256 ::/NOTE.TXT || true
+
+tooltest-msdos: $(BUILD)/msdos.img
+	$(MKIMAGE) $(BUILD)/msdos-test.img $< image/msdos/config-root.sys=CONFIG.SYS $(CLAUDE_FILES)
+	$(BOOT) $(BUILD)/msdos-test.img --timeout 200 --boot-wait 3 --keys '1{wait}{wait}{wait}{wait}{wait}{wait}$(TOOL_KEYS)' --screen
+	@echo "[tooltest] NOTE.TXT on the disk afterwards:"; mtype -i $(BUILD)/msdos-test.img@@32256 ::/NOTE.TXT || true
 
 asktest-msdos: $(BUILD)/msdos.img
 	$(MKIMAGE) $(BUILD)/msdos-test.img $< image/msdos/config-root.sys=CONFIG.SYS tests/ask.bat=TEST.BAT $(CLAUDE_FILES)

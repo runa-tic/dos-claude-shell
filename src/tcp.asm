@@ -403,6 +403,7 @@ parse_url:
 ; in url_host/url_port and take the whole answer into http_seg (http_len
 ; bytes). The network must be open. CF after saying why if it fails.
 http_exchange:
+        mov     word [http_len], 0      ; a fresh answer (a turn makes several)
         mov     si, url_host
         call    host_ip
         jc      .fail
@@ -530,6 +531,11 @@ req_add_host:
 
 ; FETCH url: an HTTP GET, the answer (headers and all) printed.
 cmd_fetch:
+        cmp     byte [in_turn], 0       ; the network is Claude's for now
+        je      .free_to_go
+        mov     si, msg_busy
+        jmp     print_err
+.free_to_go:
         call    skip_blanks             ; the address as it is: its / are not switches
         cmp     byte [si], 0
         je      required_missing

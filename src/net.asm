@@ -971,6 +971,11 @@ dns_input:
 
 ; NET: the card and the address, getting one if need be.
 cmd_net:
+        cmp     byte [in_turn], 0       ; the network is Claude's for now
+        je      .free_to_go
+        mov     si, msg_busy
+        jmp     print_err
+.free_to_go:
         call    net_open
         jc      .done
         mov     si, msg_net_driver
@@ -1019,6 +1024,11 @@ cmd_net:
 
 ; PING address: four echo requests, a second apart at most.
 cmd_ping:
+        cmp     byte [in_turn], 0       ; the network is Claude's for now
+        je      .free_to_go
+        mov     si, msg_busy
+        jmp     print_err
+.free_to_go:
         call    parse_args
         cmp     word [argc], 0
         je      required_missing

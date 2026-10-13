@@ -5,7 +5,7 @@ real DOS (FreeDOS and MS-DOS 6.22) and talk to Claude over its own TCP/IP stack.
 sibling of ClauDOS: there everything under the shell was written from scratch; here DOS
 is real and only the shell is ours.
 
-**Status: phase 6, a complete DOS shell that talks to Claude.** `CLAUDE.COM` (9 KB, about 15 KB resident with
+**Status: phase 7, the plan is complete: a DOS shell that talks to Claude, who can act in it.** `CLAUDE.COM` (9 KB, about 15 KB resident with
 its buffers and a 1 KB environment) boots as the only shell on FreeDOS and MS-DOS 6.22.
 It runs `.COM`, `.EXE` and batch files from the current directory or along `PATH`, in
 DOS's order, keeping their errorlevel. Ctrl-C ends the running program and offers to end
@@ -54,8 +54,14 @@ with the key in `CLAUDE.KEY` beside it. The endpoint used in development is
 `SHIM_HOSTS=10.0.2.2`; both emulators show the host as 10.0.2.2. There is no TLS, so it
 speaks plain HTTP only.
 
-Still to come: actions, so that Claude can run commands and write files, with each
-change shown to the user first.
+**Claude acts.** Claude can run a command line in the shell and read what it printed
+(`run`), or write a text file (`write_file`). You see every command and its output. Only
+a few read-only commands run without asking: `DIR`, `TYPE`, `VER`, `VOL`, `TRUENAME`,
+`CD`, `MEM`, `ECHO` and `REM`, and `SET` or `PATH` with nothing to set, all with nothing
+redirected or piped. Anything else is shown first with "Allow it? (Y/N)". The answer is
+read from the keyboard itself, after emptying the keyboard buffer, so neither type-ahead
+nor redirected input can answer for you. While Claude acts, batch files, the network
+commands, `ASK` and `EXIT` are refused.
 
 ## Layout
 ```
@@ -69,7 +75,7 @@ src/net.asm             packet driver, ARP, IP, ICMP, UDP, DHCP, DNS; NET and PI
 src/tcp.asm             a TCP client, HTTP over it; FETCH
 src/chat.asm            Claude: the request, the conversation, the answer; ASK, NEW
 src/json.asm            enough JSON to read the answer
-src/tools.asm           the actions Claude may take (phase 7)
+src/tools.asm           Claude's actions, run and write_file, and the Y/N gate
 src/env.asm             the shell's own environment block
 src/util.asm            text, numbers, dates and file names
 image/freedos/          FDCONFIG.SYS and FDAUTO.BAT for FreeDOS; -claude variant boots our shell
@@ -107,6 +113,7 @@ make net5test       # NET, PING and FETCH under CLAUDE.COM alone (also -msdos, -
 make asktest        # ASK, the conversation, NEW, through the shim (also -msdos);
                     # set SHIM_KEY := path/to/the/key in local.mk
 make asktype        # questions typed at the prompt, the screen printed
+make tooltest       # Claude looks (DIR), writes a file (Y), may not delete it (N) (also -msdos)
 make dbx            # FreeDOS in DOSBox-X
 make nettest-dbx    # the network check in DOSBox-X, headless
 ```
