@@ -1,0 +1,3 @@
+hello piped
+rem a comment
+EXIT

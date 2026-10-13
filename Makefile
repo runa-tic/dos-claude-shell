@@ -5,11 +5,14 @@
 ##   make freedos      build/freedos.img: FreeDOS with FreeCOM, the network, and CLAUDE.COM beside it
 ##   make run          boot that in a QEMU window; the console is kept in logs/
 ##   make nettest      headless: DHCP, ping the host, TCP to the shim, printed from C:\RESULT.TXT
-##   make shelltest    headless: boot with SHELL=\CLAUDE.COM, type a line, print the screen
+##   make shelltest    headless: boot with SHELL=\CLAUDE.COM as the only shell, type at it,
+##                     print the screens (programs, Ctrl-C, a critical error, batch files)
+##   make childtest    headless: the system shell runs CLAUDE.COM /C ... as a child; PATH
+##                     search, errorlevels, input from a file; printed from C:\RESULT.TXT
 ##   make msdos ...    the same on a copy of your own MS-DOS 6.22 image (msdos, run-msdos,
-##                     nettest-msdos, shelltest-msdos); set MSDOS_BASE in local.mk
+##                     nettest-msdos, shelltest-msdos, childtest-msdos); set MSDOS_BASE in local.mk
 ##   make dbx          boot FreeDOS in a DOSBox-X window (DOSBOX_IMG=build/msdos.img for MS-DOS)
-##   make nettest-dbx  the network test in DOSBox-X, headless
+##   make nettest-dbx  the network test in DOSBox-X, headless (childtest-dbx likewise)
 ##
 ## Every image is a copy: the FreeDOS download and your MS-DOS image are never written.
 
@@ -33,8 +36,8 @@ NETFILES = $(PKG)/DRIVERS/CRYNWR/NE2000.COM=NET/NE2000.COM \
            $(PKG)/NET/mTCP/htget.exe=NET/HTGET.EXE \
            $(PKG)/NET/mTCP/nc.exe=NET/NC.EXE
 
-.PHONY: all fetch freedos run nettest shelltest msdos run-msdos nettest-msdos shelltest-msdos \
-        dbx nettest-dbx clean
+.PHONY: all fetch freedos run nettest shelltest childtest msdos run-msdos nettest-msdos \
+        shelltest-msdos childtest-msdos dbx nettest-dbx childtest-dbx clean
 
 all: $(SHELL_COM)
 
@@ -43,6 +46,32 @@ $(BUILD):
 
 $(SHELL_COM): src/claude.asm | $(BUILD)
 	nasm -f bin -o $@ $<
+
+# Test programs: HELLO.COM prints its tail and memory, HELLOX.EXE is a hand-made MZ.
+$(BUILD)/hello.com: tests/hello.asm | $(BUILD)
+	nasm -f bin -o $@ $<
+
+$(BUILD)/hellox.exe: tests/hellox.asm | $(BUILD)
+	nasm -f bin -o $@ $<
+
+TESTPROGS = $(BUILD)/hello.com $(BUILD)/hellox.exe
+T_FILES = $(BUILD)/hello.com=T/HELLO.COM $(BUILD)/hellox.exe=T/HELLOX.EXE \
+          $(BUILD)/hello.com=T/PICK.COM $(BUILD)/hellox.exe=T/PICK.EXE \
+          $(BUILD)/hellox.exe=T/PICK2.EXE tests/pick2.bat=T/PICK2.BAT \
+          tests/sub.bat=T/SUB.BAT tests/slow.bat=T/SLOW.BAT \
+          tests/input.txt=T/INPUT.TXT tests/noexit.txt=T/NOEXIT.TXT tests/startup.bat=STARTUP.BAT
+
+# What shelltest types: a program, EXIT (ignored, the shell is permanent), Ctrl-C in a
+# program and at the prompt, a bad drive, a batch file, Ctrl-C in a batch file, and a
+# critical error on the empty floppy drive answered Fail and then Abort (the $P prompt
+# reads the drive too, so it asks once more, as COMMAND.COM does). The root shell
+# has no PATH, so programs are named by path. Make would put spaces between continued
+# lines, so the keys are glued together from pieces.
+K1 = t\hello typed{ret}{wait}exit{ret}t\hello wait{ret}{wait}{key:ctrl-c}{wait}
+K2 = abc{key:ctrl-c}{wait}q:{ret}{wait}t\sub{ret}{wait}{wait}{screen}
+K3 = t\slow{ret}{wait}{wait}{key:ctrl-c}{wait}y{wait}{wait}a:{ret}{wait}{wait}{wait}{wait}{wait}{wait}f{wait}{wait}
+K4 = hello{ret}{wait}{wait}{wait}{wait}{wait}{wait}a{wait}{wait}{wait}{wait}{wait}{wait}f{wait}{wait}c:{ret}{wait}t\hello back{ret}{wait}
+ROOT_KEYS = $(K1)$(K2)$(K3)$(K4)
 
 fetch:
 	sh tools/fetch.sh
@@ -79,9 +108,13 @@ nettest: $(BUILD)/freedos.img
 	$(MKIMAGE) $(BUILD)/freedos-test.img $< tests/net.bat=TEST.BAT
 	$(BOOT) $(BUILD)/freedos-test.img --timeout 120 --result RESULT.TXT
 
-shelltest: $(BUILD)/freedos.img
-	$(MKIMAGE) $(BUILD)/freedos-test.img $< image/freedos/fdconfig-claude.sys=FDCONFIG.SYS
-	$(BOOT) $(BUILD)/freedos-test.img --timeout 14 --keys 'hello from the keyboard{ret}' --screen
+shelltest: $(BUILD)/freedos.img $(TESTPROGS)
+	$(MKIMAGE) $(BUILD)/freedos-test.img $< image/freedos/fdconfig-claude.sys=FDCONFIG.SYS $(T_FILES)
+	$(BOOT) $(BUILD)/freedos-test.img --timeout 90 --keys '$(ROOT_KEYS)' --screen
+
+childtest: $(BUILD)/freedos.img $(TESTPROGS)
+	$(MKIMAGE) $(BUILD)/freedos-test.img $< tests/child.bat=TEST.BAT $(T_FILES)
+	$(BOOT) $(BUILD)/freedos-test.img --timeout 120 --result RESULT.TXT
 
 # ---- MS-DOS 6.22: your own image, named in local.mk, never committed ----
 # The image in use boots through its own MBR menu, so the tests press 1 ("Boot DOS").
@@ -103,10 +136,14 @@ nettest-msdos: $(BUILD)/msdos.img
 	$(MKIMAGE) $(BUILD)/msdos-test.img $< tests/net.bat=TEST.BAT
 	$(BOOT) $(BUILD)/msdos-test.img --timeout 120 --boot-wait 3 --keys '1' --result RESULT.TXT
 
-shelltest-msdos: $(BUILD)/msdos.img
-	$(MKIMAGE) $(BUILD)/msdos-test.img $< image/msdos/config-claude.sys=CONFIG.SYS
-	$(BOOT) $(BUILD)/msdos-test.img --timeout 20 --boot-wait 3 \
-	  --keys '1{wait}{wait}{wait}{wait}{wait}{wait}hello from the keyboard{ret}' --screen
+shelltest-msdos: $(BUILD)/msdos.img $(TESTPROGS)
+	$(MKIMAGE) $(BUILD)/msdos-test.img $< image/msdos/config-claude.sys=CONFIG.SYS $(T_FILES)
+	$(BOOT) $(BUILD)/msdos-test.img --timeout 100 --boot-wait 3 \
+	  --keys '1{wait}{wait}{wait}{wait}{wait}{wait}$(ROOT_KEYS)' --screen
+
+childtest-msdos: $(BUILD)/msdos.img $(TESTPROGS)
+	$(MKIMAGE) $(BUILD)/msdos-test.img $< tests/child.bat=TEST.BAT $(T_FILES)
+	$(BOOT) $(BUILD)/msdos-test.img --timeout 120 --boot-wait 3 --keys '1' --result RESULT.TXT
 
 # ---- DOSBox-X: boots the same real-DOS images, NE2000 on its slirp network ----
 
@@ -121,6 +158,12 @@ dbx: $(DOSBOX_IMG)
 # test closes DOSBox-X. The FreeDOS image only: the MS-DOS one waits at a boot menu.
 nettest-dbx: $(BUILD)/freedos.img
 	$(MKIMAGE) $(BUILD)/dbx.img $< tests/net.bat=TEST.BAT
+	sed "s#%IMG%#$$PWD/$(BUILD)/dbx.img#" image/dosbox-x/boot.conf > $(BUILD)/dbx.conf
+	SDL_VIDEODRIVER=dummy perl -e 'alarm 150; exec @ARGV' dosbox-x -conf $(BUILD)/dbx.conf -silent > $(BUILD)/dbx.log 2>&1 || true
+	mtype -i $(BUILD)/dbx.img@@32256 ::/RESULT.TXT | tr -d '\r'
+
+childtest-dbx: $(BUILD)/freedos.img $(TESTPROGS)
+	$(MKIMAGE) $(BUILD)/dbx.img $< tests/child.bat=TEST.BAT $(T_FILES)
 	sed "s#%IMG%#$$PWD/$(BUILD)/dbx.img#" image/dosbox-x/boot.conf > $(BUILD)/dbx.conf
 	SDL_VIDEODRIVER=dummy perl -e 'alarm 150; exec @ARGV' dosbox-x -conf $(BUILD)/dbx.conf -silent > $(BUILD)/dbx.log 2>&1 || true
 	mtype -i $(BUILD)/dbx.img@@32256 ::/RESULT.TXT | tr -d '\r'
