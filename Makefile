@@ -60,7 +60,7 @@ T_FILES = $(BUILD)/hello.com=T/HELLO.COM $(BUILD)/hellox.exe=T/HELLOX.EXE \
           $(BUILD)/hellox.exe=T/PICK2.EXE tests/pick2.bat=T/PICK2.BAT \
           tests/sub.bat=T/SUB.BAT tests/slow.bat=T/SLOW.BAT \
           tests/input.txt=T/INPUT.TXT tests/noexit.txt=T/NOEXIT.TXT tests/startup.bat=STARTUP.BAT \
-          tests/p2.bat=T/P2.BAT
+          tests/p2.bat=T/P2.BAT tests/p3.bat=T/P3.BAT tests/p3sub.bat=T/P3SUB.BAT
 
 # What shelltest types: a program, EXIT (ignored, the shell is permanent), Ctrl-C in a
 # program and at the prompt, a bad drive, a batch file, Ctrl-C in a batch file, and a
@@ -123,7 +123,7 @@ shelltest: $(BUILD)/freedos.img $(TESTPROGS)
 # as the reference, each in an empty directory; both outputs are printed.
 cmdtest: $(BUILD)/freedos.img $(TESTPROGS)
 	$(MKIMAGE) $(BUILD)/freedos-test.img $< tests/cmds.bat=TEST.BAT $(T_FILES)
-	$(BOOT) $(BUILD)/freedos-test.img --timeout 120 --result OURS.TXT REF.TXT
+	$(BOOT) $(BUILD)/freedos-test.img --timeout 120 --result OURS.TXT REF.TXT OURS3.TXT REF3.TXT
 
 childtest: $(BUILD)/freedos.img $(TESTPROGS)
 	$(MKIMAGE) $(BUILD)/freedos-test.img $< tests/child.bat=TEST.BAT $(T_FILES)
@@ -156,7 +156,7 @@ shelltest-msdos: $(BUILD)/msdos.img $(TESTPROGS)
 
 cmdtest-msdos: $(BUILD)/msdos.img $(TESTPROGS)
 	$(MKIMAGE) $(BUILD)/msdos-test.img $< tests/cmds.bat=TEST.BAT $(T_FILES)
-	$(BOOT) $(BUILD)/msdos-test.img --timeout 120 --boot-wait 3 --keys '1' --result OURS.TXT REF.TXT
+	$(BOOT) $(BUILD)/msdos-test.img --timeout 120 --boot-wait 3 --keys '1' --result OURS.TXT REF.TXT OURS3.TXT REF3.TXT
 
 childtest-msdos: $(BUILD)/msdos.img $(TESTPROGS)
 	$(MKIMAGE) $(BUILD)/msdos-test.img $< tests/child.bat=TEST.BAT $(T_FILES)
@@ -183,7 +183,7 @@ cmdtest-dbx: $(BUILD)/freedos.img $(TESTPROGS)
 	$(MKIMAGE) $(BUILD)/dbx.img $< tests/cmds.bat=TEST.BAT $(T_FILES)
 	sed "s#%IMG%#$$PWD/$(BUILD)/dbx.img#" image/dosbox-x/boot.conf > $(BUILD)/dbx.conf
 	SDL_VIDEODRIVER=dummy perl -e 'alarm 150; exec @ARGV' dosbox-x -conf $(BUILD)/dbx.conf -silent > $(BUILD)/dbx.log 2>&1 || true
-	@for f in OURS.TXT REF.TXT; do echo "===== $$f"; mtype -i $(BUILD)/dbx.img@@32256 ::/$$f | tr -d '\r'; done
+	@for f in OURS.TXT REF.TXT OURS3.TXT REF3.TXT; do echo "===== $$f"; mtype -i $(BUILD)/dbx.img@@32256 ::/$$f | tr -d '\r'; done
 
 childtest-dbx: $(BUILD)/freedos.img $(TESTPROGS)
 	$(MKIMAGE) $(BUILD)/dbx.img $< tests/child.bat=TEST.BAT $(T_FILES)

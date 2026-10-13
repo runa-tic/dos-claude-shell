@@ -5,7 +5,7 @@ real DOS (FreeDOS and MS-DOS 6.22) and talk to Claude over its own TCP/IP stack.
 sibling of ClauDOS: there everything under the shell was written from scratch; here DOS
 is real and only the shell is ours.
 
-**Status: phase 2, a usable DOS shell.** `CLAUDE.COM` (9 KB, about 15 KB resident with
+**Status: phase 3, a usable DOS shell with batch files.** `CLAUDE.COM` (9 KB, about 15 KB resident with
 its buffers and a 1 KB environment) boots as the only shell on FreeDOS and MS-DOS 6.22.
 It runs `.COM`, `.EXE` and batch files from the current directory or along `PATH`, in
 DOS's order, keeping their errorlevel. Ctrl-C ends the running program and offers to end
@@ -19,8 +19,12 @@ Its own commands: `DIR` (`/W /B /P /A`), `CD`, `MD`, `RD`, `COPY` (wildcards, `*
 both `COMMAND.COM` and FreeCOM do. Started by DOS, it sets `COMSPEC` to itself, so
 programs that shell out come back to it.
 
-Still to come: the batch language (`%1`, `%VAR%`, `IF`, `GOTO`, `CALL`, `FOR`, `SHIFT`)
-in phase 3, redirection and pipes in phase 4, then the network and Claude.
+Batch files have the whole MS-DOS 6.22 language: `%0`-`%9`, `%VAR%`, `%%`, `IF [NOT]
+ERRORLEVEL | EXIST | ==`, `GOTO`, `CALL` (nested up to 8 deep), `FOR %%V IN (...) DO`
+with wildcards, `SHIFT`, `ECHO OFF` and `@`. A test batch file using all of it gives the
+same output under this shell as under MS-DOS's `COMMAND.COM`, blank lines included.
+
+Still to come: redirection and pipes in phase 4, then the network and Claude.
 
 ## Layout
 ```
@@ -28,6 +32,7 @@ src/claude.asm          the shell: start-up, the loop, running programs, batch f
                         Ctrl-C and critical errors
 src/cmds.asm            the internal commands but DIR and COPY, which have files of their own
 src/dir.asm src/copy.asm
+src/batch.asm           batch files: % expansion, CALL, GOTO, SHIFT, IF, FOR
 src/env.asm             the shell's own environment block
 src/util.asm            text, numbers, dates and file names
 image/freedos/          FDCONFIG.SYS and FDAUTO.BAT for FreeDOS; -claude variant boots our shell
@@ -39,6 +44,7 @@ tests/child.bat         the shell run by the system's own shell: PATH, errorleve
 tests/hello.asm         HELLO.COM: prints its command tail, memory and FCB; HELLO WAIT waits
 tests/hellox.asm        HELLOX.EXE: a hand-made MZ executable
 tests/p2.bat            the internal commands, run by our shell and by the system's for comparison
+tests/p3.bat            the batch language, likewise (with p3sub.bat for CALL)
 tests/*.bat, *.txt      batch files and input for the tests
 tools/fetch.sh          downloads FreeDOS 1.4 Lite, the NE2000 driver and mTCP, hash-checked
 tools/mkimage.py        a copy of a base disk image with files put onto it (mtools)

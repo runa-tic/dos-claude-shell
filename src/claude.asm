@@ -1,14 +1,15 @@
 ; ============================================================
 ; CLAUDE.COM - a shell for DOS that talks to Claude.
 ;
-; Phase 2: a DOS shell. It reads a line, runs the program the
+; Phase 3: a DOS shell. It reads a line, runs the program the
 ; line names (a .COM, an .EXE or a batch file, looked for in the
 ; current directory and then along PATH), handles Ctrl-C and
 ; critical errors, and can be the system shell (SHELL= in
 ; CONFIG.SYS) with no COMMAND.COM anywhere. Its own commands are
 ; DIR, CD, MD, RD, COPY, DEL, REN, TYPE, ECHO, SET, PATH, PROMPT,
 ; CLS, VER, VOL, DATE, TIME, BREAK, VERIFY, TRUENAME, PAUSE, LH,
-; EXIT, REM and drive changes such as A:. It keeps an environment
+; IF, FOR, GOTO, SHIFT, CALL, EXIT, REM and drive changes such as
+; A:. It keeps an environment
 ; block of its own, which the programs it runs inherit.
 ;
 ; Source files: this one (start-up, the loop, running programs,
@@ -24,10 +25,8 @@
 ;   /E:n       an environment of n bytes (default 1024)
 ; A leading directory (COMMAND.COM's own location) is ignored.
 ;
-; Batch files run one line at a time, reopened for every line as
-; COMMAND.COM does; '@' hides a line, ':' lines are labels, and
-; ECHO OFF stops the echo. %1, IF, GOTO, CALL and the rest come in
-; phase 3.
+; Batch files (batch.asm) have %0-%9, %VAR%, IF, GOTO, CALL,
+; FOR, SHIFT, ECHO OFF and '@', as in MS-DOS 6.22.
 ;
 ; 386 real mode: 32-bit registers are allowed, but DOS and BIOS
 ; calls only promise to keep the low 16 bits of each register.
@@ -104,7 +103,9 @@ start:
         cmp     byte [mode], 'C'
         je      .quiet
         call    banner
-.quiet:
+        jmp     .shown
+.quiet: mov     byte [quiet_start], 1   ; nothing printed yet
+.shown:
         cmp     byte [mode], 0
         je      .startup
         cmp     byte [mode], 'C'
@@ -134,6 +135,11 @@ start:
         jc      main_loop               ; no startup file: just a prompt
         mov     byte [tailbuf], 0
         mov     byte [tailbuf + 1], 13
+        mov     word [cmd_start], progpath   ; %0 is its full name
+        mov     si, progpath
+        call    strlen
+        add     ax, progpath
+        mov     [tok_end], ax
         call    start_batch
         ; fall through
 
@@ -326,6 +332,9 @@ do_exit:
 ; execute_line: run the command line at SI (ASCIIZ).
 ; ------------------------------------------------------------
 execute_line:
+        mov     al, [call_flag]         ; started by CALL?
+        mov     [this_call], al
+        mov     byte [call_flag], 0
         call    skip_blanks
         cmp     byte [si], 0
         je      .ret
@@ -373,6 +382,8 @@ execute_line:
         cmp     al, '.'
         je      .found
         cmp     al, '\'
+        je      .found
+        cmp     al, ':'                 ; GOTO:END
         je      .found
 .skip:  add     bx, 4
         jmp     .next
@@ -440,6 +451,11 @@ internals:
         dw      name_pause, cmd_pause
         dw      name_lh, cmd_lh
         dw      name_loadhigh, cmd_lh
+        dw      name_if, cmd_if
+        dw      name_for, cmd_for
+        dw      name_goto, cmd_goto
+        dw      name_shift, cmd_shift
+        dw      name_call, cmd_call
         dw      name_exit, cmd_exit
         dw      name_rem, cmd_rem
         dw      0
@@ -733,140 +749,6 @@ run_program:
         ret
 
 ; ------------------------------------------------------------
-; Batch files
-; ------------------------------------------------------------
-
-; start_batch: progpath is a batch file; run it from its first line.
-; Started from a batch file it replaces that one, as in DOS.
-start_batch:
-        mov     si, progpath            ; its full name, so a CD in it cannot lose it
-        mov     di, batch_name
-        mov     ah, 60h
-        int     21h
-        jnc     .named
-        mov     si, progpath
-        mov     di, batch_name
-.copy:  lodsb
-        stosb
-        test    al, al
-        jnz     .copy
-.named: mov     dword [batch_pos], 0
-        mov     byte [batch_active], 1
-        ret
-
-; batch_next: read the next line of the batch file into linebuf.
-; Out: CF clear and SI = the command to run, or CF set when there is
-; nothing to run (a label, an empty line, the end of the file).
-batch_next:
-        mov     dx, batch_name
-        mov     ax, 3D00h
-        int     21h
-        jc      .missing
-        mov     bx, ax
-        mov     dx, [batch_pos]
-        mov     cx, [batch_pos + 2]
-        mov     ax, 4200h
-        int     21h
-        mov     dx, batchbuf
-        mov     cx, BATCHBUF_SIZE
-        mov     ah, 3Fh
-        int     21h
-        jnc     .read
-        xor     ax, ax
-.read:  push    ax
-        mov     ah, 3Eh
-        int     21h
-        pop     cx
-        jcxz    .end
-
-        mov     si, batchbuf
-        mov     di, linebuf
-        xor     dx, dx                  ; bytes used up
-.ch:    cmp     dx, cx
-        jae     .eol
-        lodsb
-        inc     dx
-        cmp     al, 1Ah                 ; ^Z ends a text file
-        je      .eof
-        cmp     al, 10
-        je      .eol
-        cmp     al, 13
-        je      .cr
-        cmp     di, linebuf + LINE_MAX
-        jae     .ch                     ; too long: the rest is dropped
-        stosb
-        jmp     .ch
-.cr:    cmp     dx, cx
-        jae     .eol
-        cmp     byte [si], 10
-        jne     .eol
-        inc     dx
-.eol:   add     [batch_pos], dx
-        adc     word [batch_pos + 2], 0
-        jmp     .line
-.eof:   mov     dword [batch_pos], 7FFFFFFFh  ; the next read finds nothing
-.line:  mov     byte [di], 0
-
-        mov     si, linebuf
-        call    skip_blanks
-        mov     al, [si]
-        test    al, al
-        jz      .skip
-        cmp     al, ':'
-        je      .skip
-        mov     bl, [echo_on]
-        cmp     al, '@'
-        jne     .echo
-        xor     bl, bl
-        inc     si
-.echo:  test    bl, bl
-        jz      .run
-        push    si
-        call    show_prompt
-        pop     si
-        push    si
-        call    print_z
-        mov     si, crlf
-        call    print_z
-        pop     si
-.run:   clc
-        ret
-.missing:
-        mov     si, msg_batch_missing
-        call    print_err
-.end:   call    end_batch
-.skip:  stc
-        ret
-
-; end_batch: no batch file any more; ECHO is on again at the prompt.
-end_batch:
-        mov     byte [batch_active], 0
-        mov     byte [echo_on], 1
-        ret
-
-ask_terminate:
-        mov     si, msg_terminate
-        call    print_z
-.key:   mov     ah, 07h
-        int     21h
-        call    upcase
-        cmp     al, 'Y'
-        je      .answer
-        cmp     al, 'N'
-        jne     .key
-.answer:
-        push    ax
-        mov     dl, al
-        call    putc
-        mov     si, crlf
-        call    print_z
-        pop     ax
-        cmp     al, 'Y'
-        jne     .done
-        call    end_batch
-.done:  ret
-
-; ------------------------------------------------------------
 ; Ctrl-C, critical errors, and the way back to the prompt
 ; ------------------------------------------------------------
 
@@ -891,6 +773,7 @@ restart:
         mov     es, ax
         cld
         mov     byte [child_running], 0
+        mov     byte [for_active], 0
         mov     dx, dta
         mov     ah, 1Ah
         int     21h
@@ -1181,7 +1064,7 @@ banner:
 ; Data
 ; ------------------------------------------------------------
 
-msg_banner      db 'Claude shell for DOS - phase 2 (386 real mode)', 13, 10
+msg_banner      db 'Claude shell for DOS - phase 3 (386 real mode)', 13, 10
                 db 'DOS ', 0
 msg_banner_name db 'Claude shell for DOS', 0
 msg_oem         db ', OEM ', 0
@@ -1248,6 +1131,11 @@ name_truename   db 'TRUENAME', 0
 name_pause      db 'PAUSE', 0
 name_lh         db 'LH', 0
 name_loadhigh   db 'LOADHIGH', 0
+name_if         db 'IF', 0
+name_for        db 'FOR', 0
+name_goto       db 'GOTO', 0
+name_shift      db 'SHIFT', 0
+name_call       db 'CALL', 0
 name_exit       db 'EXIT', 0
 name_rem        db 'REM', 0
 default_prompt  db '$P$G', 0
@@ -1258,6 +1146,7 @@ dot_exts        db '.COM', 0, '.EXE', 0, '.BAT', 0
 delims          db 0, ' ', 9, 10, 13, '/', '<', '>', '|', '=', ',', ';', '+', '"'
 delims_end:
 
+%include "batch.asm"
 %include "cmds.asm"
 %include "dir.asm"
 %include "copy.asm"
@@ -1287,7 +1176,6 @@ crit_drive      resb 1
 crit_failed     resb 1          ; a critical error in our own call was answered Fail
                 alignb 4
 crit_dev        resd 1
-batch_pos       resd 1
 oneshot         resw 1
 cmd_start       resw 1
 tok_end         resw 1
@@ -1311,7 +1199,6 @@ cmdname         resb NAME_MAX + 2
 dirbuf          resb NAME_MAX + 2
 progpath        resb 2 * NAME_MAX + 8
 tailbuf         resb LINE_MAX + 4
-batch_name      resb 130
 PROMPTBUF_SIZE  equ 130
 promptbuf       resb PROMPTBUF_SIZE
 dta             resb 44
