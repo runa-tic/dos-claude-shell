@@ -1,6 +1,8 @@
 ## dos-claude-shell build. Needs nasm, qemu-system-i386, mtools and python3.
 ##
 ##   make              build/claude.com, the shell
+##   make play         try it: FreeDOS in a QEMU window, CLAUDE.COM the only shell, Claude
+##                     set up (play-msdos, play-dbx likewise; the key: SHIM_KEY in local.mk)
 ##   make fetch        download FreeDOS 1.4 Lite, the NE2000 packet driver and mTCP (hash-checked)
 ##   make freedos      build/freedos.img: FreeDOS with FreeCOM, the network, and CLAUDE.COM beside it
 ##   make run          boot that in a QEMU window; the console is kept in logs/
@@ -36,8 +38,8 @@ NETFILES = $(PKG)/DRIVERS/CRYNWR/NE2000.COM=NET/NE2000.COM \
            $(PKG)/NET/mTCP/htget.exe=NET/HTGET.EXE \
            $(PKG)/NET/mTCP/nc.exe=NET/NC.EXE
 
-.PHONY: all fetch freedos run nettest shelltest childtest cmdtest msdos run-msdos nettest-msdos \
-        shelltest-msdos childtest-msdos cmdtest-msdos roottest rootnet roottest-msdos rootnet-msdos net5test net5test-msdos asktest asktest-msdos asktype tooltest tooltest-msdos dbx nettest-dbx childtest-dbx cmdtest-dbx net5test-dbx clean
+.PHONY: all fetch freedos play play-msdos play-dbx run nettest shelltest childtest cmdtest msdos run-msdos nettest-msdos \
+        shelltest-msdos childtest-msdos cmdtest-msdos roottest rootnet roottest-msdos rootnet-msdos net5test net5test-msdos asktest asktest-msdos asktype tooltest tooltest-msdos dbx nettest-dbx childtest-dbx cmdtest-dbx net5test-dbx asktest-dbx clean
 
 all: $(SHELL_COM)
 
@@ -109,6 +111,24 @@ $(BUILD)/freedos.img: $(FD_BASE) $(PKG)/.done $(SHELL_COM) image/freedos/* image
 	$(MKIMAGE) $@ $(FD_BASE) $(FD_FILES)
 
 freedos: $(BUILD)/freedos.img
+
+# The way to try it: CLAUDE.COM the only shell, the network up, Claude set up (url and
+# model in CLAUDE.CFG; the key from SHIM_KEY in local.mk), in a QEMU window. A fresh copy
+# every time: build/play.img, changed as you like and thrown away on the next run.
+play: $(BUILD)/freedos.img $(TESTPROGS)
+	$(MKIMAGE) $(BUILD)/play.img $< image/freedos/fdconfig-root.sys=FDCONFIG.SYS $(CLAUDE_FILES) $(T_FILES)
+	@mkdir -p logs
+	$(QEMU) -drive format=raw,file=$(BUILD)/play.img -serial file:logs/console-$$(date +%Y%m%d-%H%M%S).log
+
+play-msdos: $(BUILD)/msdos.img $(TESTPROGS)
+	$(MKIMAGE) $(BUILD)/play-msdos.img $< image/msdos/config-root.sys=CONFIG.SYS $(CLAUDE_FILES) $(T_FILES)
+	@mkdir -p logs
+	$(QEMU) -drive format=raw,file=$(BUILD)/play-msdos.img -serial file:logs/console-$$(date +%Y%m%d-%H%M%S).log
+
+play-dbx: $(BUILD)/freedos.img $(TESTPROGS)
+	$(MKIMAGE) $(BUILD)/play.img $< image/freedos/fdconfig-root.sys=FDCONFIG.SYS $(CLAUDE_FILES) $(T_FILES)
+	sed "s#%IMG%#$$PWD/$(BUILD)/play.img#" image/dosbox-x/boot.conf > $(BUILD)/play-dbx.conf
+	dosbox-x -conf $(BUILD)/play-dbx.conf
 
 run: $(BUILD)/freedos.img
 	@mkdir -p logs
@@ -259,6 +279,12 @@ net5test-dbx: $(BUILD)/freedos.img
 	$(MKIMAGE) $(BUILD)/dbx.img $< image/freedos/fdconfig-root.sys=FDCONFIG.SYS tests/net5.bat=TEST.BAT
 	sed "s#%IMG%#$$PWD/$(BUILD)/dbx.img#" image/dosbox-x/boot.conf > $(BUILD)/dbx.conf
 	SDL_VIDEODRIVER=dummy perl -e 'alarm 150; exec @ARGV' dosbox-x -conf $(BUILD)/dbx.conf -silent > $(BUILD)/dbx.log 2>&1 || true
+	mtype -i $(BUILD)/dbx.img@@32256 ::/RESULT.TXT | tr -d '\r'
+
+asktest-dbx: $(BUILD)/freedos.img
+	$(MKIMAGE) $(BUILD)/dbx.img $< image/freedos/fdconfig-root.sys=FDCONFIG.SYS tests/ask.bat=TEST.BAT $(CLAUDE_FILES)
+	sed "s#%IMG%#$$PWD/$(BUILD)/dbx.img#" image/dosbox-x/boot.conf > $(BUILD)/dbx.conf
+	SDL_VIDEODRIVER=dummy perl -e 'alarm 300; exec @ARGV' dosbox-x -conf $(BUILD)/dbx.conf -silent > $(BUILD)/dbx.log 2>&1 || true
 	mtype -i $(BUILD)/dbx.img@@32256 ::/RESULT.TXT | tr -d '\r'
 
 childtest-dbx: $(BUILD)/freedos.img $(TESTPROGS)
