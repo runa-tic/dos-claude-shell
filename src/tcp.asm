@@ -411,7 +411,8 @@ http_exchange:
         jc      .fail
         mov     ax, [req_seg]
         mov     [tx_seg], ax
-        mov     word [tx_off], 0
+        mov     ax, [req_start]
+        mov     [tx_off], ax
         mov     cx, [req_len]
         call    tcp_send
         jc      .drop
@@ -534,8 +535,11 @@ cmd_fetch:
         je      required_missing
         call    parse_url
         jc      .done
+        call    last_fit
         call    http_buffers
+        call    first_fit
         jc      .done
+        mov     word [req_start], 0
         mov     si, http_get
         call    req_add
         mov     si, url_path

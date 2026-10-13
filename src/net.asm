@@ -69,9 +69,11 @@ net_open:
         jnc     .found
         mov     si, msg_no_driver
         jmp     .fail
-.found: mov     bx, (RING_SLOTS * SLOT_SIZE) / 16
+.found: call    last_fit
+        mov     bx, (RING_SLOTS * SLOT_SIZE) / 16
         mov     ah, 48h
         int     21h
+        call    first_fit
         jnc     .ring
         mov     si, msg_net_memory
         jmp     .fail

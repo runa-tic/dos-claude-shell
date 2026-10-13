@@ -5,7 +5,7 @@ real DOS (FreeDOS and MS-DOS 6.22) and talk to Claude over its own TCP/IP stack.
 sibling of ClauDOS: there everything under the shell was written from scratch; here DOS
 is real and only the shell is ours.
 
-**Status: phase 5, a complete DOS shell with its own network stack.** `CLAUDE.COM` (9 KB, about 15 KB resident with
+**Status: phase 6, a complete DOS shell that talks to Claude.** `CLAUDE.COM` (9 KB, about 15 KB resident with
 its buffers and a 1 KB environment) boots as the only shell on FreeDOS and MS-DOS 6.22.
 It runs `.COM`, `.EXE` and batch files from the current directory or along `PATH`, in
 DOS's order, keeping their errorlevel. Ctrl-C ends the running program and offers to end
@@ -38,7 +38,24 @@ UDP, DHCP, DNS and a TCP client. `NET` shows the card and the address (from DHCP
 and `FETCH http://host[:port]/path` prints an HTTP answer. The packet driver is only held
 while one of them runs, so mTCP and other programs can use the card in between.
 
-Still to come: Claude.
+**Claude.** `ASK question` sends a question to Claude, and so does any line typed at the
+prompt that is not a command (in a batch file it is still "Bad command or file name").
+The answer is printed wrapped to 80 columns. The conversation is remembered between
+questions until `NEW`. It goes over our own TCP/IP to the Messages API endpoint named in
+`CLAUDE.CFG` beside the shell:
+
+```
+url=http://10.0.2.2:8765/v1/messages
+model=claude-haiku-5-5
+```
+
+with the key in `CLAUDE.KEY` beside it. The endpoint used in development is
+[claude-p-shim](https://github.com/runa-tic/claude-p-shim) on the host, started with
+`SHIM_HOSTS=10.0.2.2`; both emulators show the host as 10.0.2.2. There is no TLS, so it
+speaks plain HTTP only.
+
+Still to come: actions, so that Claude can run commands and write files, with each
+change shown to the user first.
 
 ## Layout
 ```
@@ -50,6 +67,9 @@ src/batch.asm           batch files: % expansion, CALL, GOTO, SHIFT, IF, FOR
 src/redir.asm           redirection and pipes
 src/net.asm             packet driver, ARP, IP, ICMP, UDP, DHCP, DNS; NET and PING
 src/tcp.asm             a TCP client, HTTP over it; FETCH
+src/chat.asm            Claude: the request, the conversation, the answer; ASK, NEW
+src/json.asm            enough JSON to read the answer
+src/tools.asm           the actions Claude may take (phase 7)
 src/env.asm             the shell's own environment block
 src/util.asm            text, numbers, dates and file names
 image/freedos/          FDCONFIG.SYS and FDAUTO.BAT for FreeDOS; -claude variant boots our shell
@@ -84,6 +104,9 @@ make roottest       # headless: CLAUDE.COM the only shell, FDAUTO.BAT calls the 
 make rootnet        # the same with the network check
 make net5test       # NET, PING and FETCH under CLAUDE.COM alone (also -msdos, -dbx);
                     # its 40 KB download wants a web server on the host's port 8766
+make asktest        # ASK, the conversation, NEW, through the shim (also -msdos);
+                    # set SHIM_KEY := path/to/the/key in local.mk
+make asktype        # questions typed at the prompt, the screen printed
 make dbx            # FreeDOS in DOSBox-X
 make nettest-dbx    # the network check in DOSBox-X, headless
 ```

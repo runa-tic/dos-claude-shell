@@ -37,7 +37,7 @@ NETFILES = $(PKG)/DRIVERS/CRYNWR/NE2000.COM=NET/NE2000.COM \
            $(PKG)/NET/mTCP/nc.exe=NET/NC.EXE
 
 .PHONY: all fetch freedos run nettest shelltest childtest cmdtest msdos run-msdos nettest-msdos \
-        shelltest-msdos childtest-msdos cmdtest-msdos roottest rootnet roottest-msdos rootnet-msdos net5test net5test-msdos dbx nettest-dbx childtest-dbx cmdtest-dbx net5test-dbx clean
+        shelltest-msdos childtest-msdos cmdtest-msdos roottest rootnet roottest-msdos rootnet-msdos net5test net5test-msdos asktest asktest-msdos asktype dbx nettest-dbx childtest-dbx cmdtest-dbx net5test-dbx clean
 
 all: $(SHELL_COM)
 
@@ -146,6 +146,15 @@ net5test: $(BUILD)/freedos.img
 	$(MKIMAGE) $(BUILD)/freedos-test.img $< image/freedos/fdconfig-root.sys=FDCONFIG.SYS tests/net5.bat=TEST.BAT
 	$(BOOT) $(BUILD)/freedos-test.img --timeout 120 --result RESULT.TXT
 
+# Phase 6: ASK, the conversation and NEW, through claude-p-shim on the host's port
+# 8765 (started with SHIM_HOSTS=10.0.2.2). The key comes from SHIM_KEY, a path set in
+# local.mk; it is copied onto the test image only, and never printed.
+CLAUDE_FILES = image/common/CLAUDE.CFG=CLAUDE.CFG $(if $(SHIM_KEY),$(SHIM_KEY)=CLAUDE.KEY)
+
+asktest: $(BUILD)/freedos.img
+	$(MKIMAGE) $(BUILD)/freedos-test.img $< image/freedos/fdconfig-root.sys=FDCONFIG.SYS tests/ask.bat=TEST.BAT $(CLAUDE_FILES)
+	$(BOOT) $(BUILD)/freedos-test.img --timeout 300 --result RESULT.TXT
+
 rootnet: $(BUILD)/freedos.img
 	$(MKIMAGE) $(BUILD)/freedos-test.img $< image/freedos/fdconfig-root.sys=FDCONFIG.SYS tests/net.bat=TEST.BAT
 	$(BOOT) $(BUILD)/freedos-test.img --timeout 120 --result RESULT.TXT
@@ -190,6 +199,17 @@ roottest-msdos: $(BUILD)/msdos.img $(TESTPROGS)
 net5test-msdos: $(BUILD)/msdos.img
 	$(MKIMAGE) $(BUILD)/msdos-test.img $< image/msdos/config-root.sys=CONFIG.SYS tests/net5.bat=TEST.BAT
 	$(BOOT) $(BUILD)/msdos-test.img --timeout 120 --boot-wait 3 --keys '1' --result RESULT.TXT
+
+# Typed at the prompt: a line that is not a command goes to Claude; a long answer wraps.
+ASK_KEYS = what is the capital of france{ret}{wait}{wait}{wait}{wait}{wait}{wait}{wait}{wait}\
+in about 70 words, what is a packet driver{ret}
+asktype: $(BUILD)/freedos.img
+	$(MKIMAGE) $(BUILD)/freedos-test.img $< image/freedos/fdconfig-root.sys=FDCONFIG.SYS $(CLAUDE_FILES)
+	$(BOOT) $(BUILD)/freedos-test.img --timeout 60 --boot-wait 8 --keys '$(ASK_KEYS)' --screen
+
+asktest-msdos: $(BUILD)/msdos.img
+	$(MKIMAGE) $(BUILD)/msdos-test.img $< image/msdos/config-root.sys=CONFIG.SYS tests/ask.bat=TEST.BAT $(CLAUDE_FILES)
+	$(BOOT) $(BUILD)/msdos-test.img --timeout 300 --boot-wait 3 --keys '1' --result RESULT.TXT
 
 rootnet-msdos: $(BUILD)/msdos.img
 	$(MKIMAGE) $(BUILD)/msdos-test.img $< image/msdos/config-root.sys=CONFIG.SYS tests/net.bat=TEST.BAT

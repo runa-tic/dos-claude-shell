@@ -1,7 +1,7 @@
 ; ============================================================
 ; CLAUDE.COM - a shell for DOS that talks to Claude.
 ;
-; Phase 5: a DOS shell with a network. It reads a line, runs the program the
+; Phase 6: a DOS shell that talks to Claude. It reads a line, runs the program the
 ; line names (a .COM, an .EXE or a batch file, looked for in the
 ; current directory and then along PATH), handles Ctrl-C and
 ; critical errors, and can be the system shell (SHELL= in
@@ -28,7 +28,9 @@
 ; Batch files (batch.asm) have %0-%9, %VAR%, IF, GOTO, CALL,
 ; FOR, SHIFT, ECHO OFF and '@', as in MS-DOS 6.22. Every line can
 ; use < > >> and | (redir.asm). NET, PING and FETCH use its own
-; TCP/IP (net.asm, tcp.asm) through a packet driver.
+; TCP/IP (net.asm, tcp.asm) through a packet driver. ASK, and any
+; line typed at the prompt that is not a command, goes to Claude
+; (chat.asm, json.asm) through the Messages API.
 ;
 ; 386 real mode: 32-bit registers are allowed, but DOS and BIOS
 ; calls only promise to keep the low 16 bits of each register.
@@ -157,10 +159,13 @@ main_loop:
         jne     .exit
         call    read_command
         mov     si, linebuf
+        mov     byte [from_keyboard], 1
         jmp     .run
 .batch: call    batch_next
         jc      main_loop
+        mov     byte [from_keyboard], 0
 .run:   call    run_line
+        mov     byte [from_keyboard], 0
         jmp     main_loop
 .exit:  mov     byte [exit_after], 0
         call    do_exit
@@ -399,10 +404,18 @@ execute_line:
         mov     si, [tok_end]
         call    build_tail
         call    find_program
-        jc      bad_command
+        jc      .not_found
         cmp     byte [prog_type], T_BAT
         je      start_batch
         jmp     run_program
+.not_found:
+        ; typed at the prompt and not a command: for Claude, if it is set up
+        cmp     byte [from_keyboard], 0
+        je      bad_command
+        call    claude_ready
+        jc      bad_command
+        mov     si, [cmd_start]
+        jmp     claude_turn
 .ret:   ret
 
 bad_command:
@@ -454,6 +467,8 @@ internals:
         dw      name_pause, cmd_pause
         dw      name_lh, cmd_lh
         dw      name_loadhigh, cmd_lh
+        dw      name_ask, cmd_ask
+        dw      name_new, cmd_new
         dw      name_net, cmd_net
         dw      name_ping, cmd_ping
         dw      name_fetch, cmd_fetch
@@ -784,6 +799,7 @@ restart:
         mov     byte [t_state], T_CLOSED        ; a network command cut short
         call    net_close
         call    http_free
+        call    first_fit
         mov     dx, dta
         mov     ah, 1Ah
         int     21h
@@ -1074,7 +1090,7 @@ banner:
 ; Data
 ; ------------------------------------------------------------
 
-msg_banner      db 'Claude shell for DOS - phase 5 (386 real mode)', 13, 10
+msg_banner      db 'Claude shell for DOS - phase 6 (386 real mode)', 13, 10
                 db 'DOS ', 0
 msg_banner_name db 'Claude shell for DOS', 0
 msg_oem         db ', OEM ', 0
@@ -1141,6 +1157,8 @@ name_truename   db 'TRUENAME', 0
 name_pause      db 'PAUSE', 0
 name_lh         db 'LH', 0
 name_loadhigh   db 'LOADHIGH', 0
+name_ask        db 'ASK', 0
+name_new        db 'NEW', 0
 name_net        db 'NET', 0
 name_ping       db 'PING', 0
 name_fetch      db 'FETCH', 0
@@ -1163,6 +1181,9 @@ delims_end:
 %include "redir.asm"
 %include "net.asm"
 %include "tcp.asm"
+%include "json.asm"
+%include "chat.asm"
+%include "tools.asm"
 %include "cmds.asm"
 %include "dir.asm"
 %include "copy.asm"
@@ -1178,6 +1199,7 @@ want_startup    resb 1
 no_startup      resb 1
 by_dos          resb 1
 mode            resb 1          ; 0, 'C' or 'K'
+from_keyboard   resb 1          ; the line running was typed at the prompt
 exit_after      resb 1
 no_blank        resb 1
 child_running   resb 1
