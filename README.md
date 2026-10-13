@@ -5,7 +5,7 @@ real DOS (FreeDOS and MS-DOS 6.22) and talk to Claude over its own TCP/IP stack.
 sibling of ClauDOS: there everything under the shell was written from scratch; here DOS
 is real and only the shell is ours.
 
-**Status: phase 4, a complete DOS shell.** `CLAUDE.COM` (9 KB, about 15 KB resident with
+**Status: phase 5, a complete DOS shell with its own network stack.** `CLAUDE.COM` (9 KB, about 15 KB resident with
 its buffers and a 1 KB environment) boots as the only shell on FreeDOS and MS-DOS 6.22.
 It runs `.COM`, `.EXE` and batch files from the current directory or along `PATH`, in
 DOS's order, keeping their errorlevel. Ctrl-C ends the running program and offers to end
@@ -32,7 +32,13 @@ It can replace `COMMAND.COM` completely: with `SHELL=\CLAUDE.COM /E:2048 /P=\FDA
 test batch files, the network check included, run under it with no other shell on the
 machine (`make roottest`, `make rootnet`, and their `-msdos` versions).
 
-Still to come: the network stack and Claude.
+It has its own TCP/IP, in assembly, over any packet driver: Ethernet, ARP, IPv4, ICMP,
+UDP, DHCP, DNS and a TCP client. `NET` shows the card and the address (from DHCP, or
+`ip=`, `mask=`, `gateway=`, `dns=` in `CLAUDE.CFG` beside the shell), `PING host` pings,
+and `FETCH http://host[:port]/path` prints an HTTP answer. The packet driver is only held
+while one of them runs, so mTCP and other programs can use the card in between.
+
+Still to come: Claude.
 
 ## Layout
 ```
@@ -42,6 +48,8 @@ src/cmds.asm            the internal commands but DIR and COPY, which have files
 src/dir.asm src/copy.asm
 src/batch.asm           batch files: % expansion, CALL, GOTO, SHIFT, IF, FOR
 src/redir.asm           redirection and pipes
+src/net.asm             packet driver, ARP, IP, ICMP, UDP, DHCP, DNS; NET and PING
+src/tcp.asm             a TCP client, HTTP over it; FETCH
 src/env.asm             the shell's own environment block
 src/util.asm            text, numbers, dates and file names
 image/freedos/          FDCONFIG.SYS and FDAUTO.BAT for FreeDOS; -claude variant boots our shell
@@ -74,6 +82,8 @@ make childtest      # headless: FreeCOM runs CLAUDE.COM /C ... as a child, C:\RE
 make cmdtest        # headless: tests/p2-p4.bat under CLAUDE.COM and under FreeCOM, both printed
 make roottest       # headless: CLAUDE.COM the only shell, FDAUTO.BAT calls the child test
 make rootnet        # the same with the network check
+make net5test       # NET, PING and FETCH under CLAUDE.COM alone (also -msdos, -dbx);
+                    # its 40 KB download wants a web server on the host's port 8766
 make dbx            # FreeDOS in DOSBox-X
 make nettest-dbx    # the network check in DOSBox-X, headless
 ```

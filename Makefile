@@ -37,7 +37,7 @@ NETFILES = $(PKG)/DRIVERS/CRYNWR/NE2000.COM=NET/NE2000.COM \
            $(PKG)/NET/mTCP/nc.exe=NET/NC.EXE
 
 .PHONY: all fetch freedos run nettest shelltest childtest cmdtest msdos run-msdos nettest-msdos \
-        shelltest-msdos childtest-msdos cmdtest-msdos roottest rootnet roottest-msdos rootnet-msdos dbx nettest-dbx childtest-dbx cmdtest-dbx clean
+        shelltest-msdos childtest-msdos cmdtest-msdos roottest rootnet roottest-msdos rootnet-msdos net5test net5test-msdos dbx nettest-dbx childtest-dbx cmdtest-dbx net5test-dbx clean
 
 all: $(SHELL_COM)
 
@@ -140,6 +140,12 @@ roottest: $(BUILD)/freedos.img $(TESTPROGS)
 	$(MKIMAGE) $(BUILD)/freedos-test.img $< image/freedos/fdconfig-root.sys=FDCONFIG.SYS tests/child.bat=TEST.BAT $(T_FILES)
 	$(BOOT) $(BUILD)/freedos-test.img --timeout 120 --result RESULT.TXT
 
+# Phase 5: NET, PING and FETCH, our own TCP/IP, with CLAUDE.COM the only shell. The
+# 40 KB download needs a web server on the host's port 8766 serving big.txt.
+net5test: $(BUILD)/freedos.img
+	$(MKIMAGE) $(BUILD)/freedos-test.img $< image/freedos/fdconfig-root.sys=FDCONFIG.SYS tests/net5.bat=TEST.BAT
+	$(BOOT) $(BUILD)/freedos-test.img --timeout 120 --result RESULT.TXT
+
 rootnet: $(BUILD)/freedos.img
 	$(MKIMAGE) $(BUILD)/freedos-test.img $< image/freedos/fdconfig-root.sys=FDCONFIG.SYS tests/net.bat=TEST.BAT
 	$(BOOT) $(BUILD)/freedos-test.img --timeout 120 --result RESULT.TXT
@@ -181,6 +187,10 @@ roottest-msdos: $(BUILD)/msdos.img $(TESTPROGS)
 	$(MKIMAGE) $(BUILD)/msdos-test.img $< image/msdos/config-root.sys=CONFIG.SYS tests/child.bat=TEST.BAT $(T_FILES)
 	$(BOOT) $(BUILD)/msdos-test.img --timeout 120 --boot-wait 3 --keys '1' --result RESULT.TXT
 
+net5test-msdos: $(BUILD)/msdos.img
+	$(MKIMAGE) $(BUILD)/msdos-test.img $< image/msdos/config-root.sys=CONFIG.SYS tests/net5.bat=TEST.BAT
+	$(BOOT) $(BUILD)/msdos-test.img --timeout 120 --boot-wait 3 --keys '1' --result RESULT.TXT
+
 rootnet-msdos: $(BUILD)/msdos.img
 	$(MKIMAGE) $(BUILD)/msdos-test.img $< image/msdos/config-root.sys=CONFIG.SYS tests/net.bat=TEST.BAT
 	$(BOOT) $(BUILD)/msdos-test.img --timeout 120 --boot-wait 3 --keys '1' --result RESULT.TXT
@@ -207,6 +217,12 @@ cmdtest-dbx: $(BUILD)/freedos.img $(TESTPROGS)
 	sed "s#%IMG%#$$PWD/$(BUILD)/dbx.img#" image/dosbox-x/boot.conf > $(BUILD)/dbx.conf
 	SDL_VIDEODRIVER=dummy perl -e 'alarm 150; exec @ARGV' dosbox-x -conf $(BUILD)/dbx.conf -silent > $(BUILD)/dbx.log 2>&1 || true
 	@for f in OURS.TXT REF.TXT OURS3.TXT REF3.TXT OURS4.TXT REF4.TXT; do echo "===== $$f"; mtype -i $(BUILD)/dbx.img@@32256 ::/$$f | tr -d '\r'; done
+
+net5test-dbx: $(BUILD)/freedos.img
+	$(MKIMAGE) $(BUILD)/dbx.img $< image/freedos/fdconfig-root.sys=FDCONFIG.SYS tests/net5.bat=TEST.BAT
+	sed "s#%IMG%#$$PWD/$(BUILD)/dbx.img#" image/dosbox-x/boot.conf > $(BUILD)/dbx.conf
+	SDL_VIDEODRIVER=dummy perl -e 'alarm 150; exec @ARGV' dosbox-x -conf $(BUILD)/dbx.conf -silent > $(BUILD)/dbx.log 2>&1 || true
+	mtype -i $(BUILD)/dbx.img@@32256 ::/RESULT.TXT | tr -d '\r'
 
 childtest-dbx: $(BUILD)/freedos.img $(TESTPROGS)
 	$(MKIMAGE) $(BUILD)/dbx.img $< tests/child.bat=TEST.BAT $(T_FILES)

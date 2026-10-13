@@ -1,7 +1,7 @@
 ; ============================================================
 ; CLAUDE.COM - a shell for DOS that talks to Claude.
 ;
-; Phase 4: a DOS shell. It reads a line, runs the program the
+; Phase 5: a DOS shell with a network. It reads a line, runs the program the
 ; line names (a .COM, an .EXE or a batch file, looked for in the
 ; current directory and then along PATH), handles Ctrl-C and
 ; critical errors, and can be the system shell (SHELL= in
@@ -27,7 +27,8 @@
 ;
 ; Batch files (batch.asm) have %0-%9, %VAR%, IF, GOTO, CALL,
 ; FOR, SHIFT, ECHO OFF and '@', as in MS-DOS 6.22. Every line can
-; use < > >> and | (redir.asm).
+; use < > >> and | (redir.asm). NET, PING and FETCH use its own
+; TCP/IP (net.asm, tcp.asm) through a packet driver.
 ;
 ; 386 real mode: 32-bit registers are allowed, but DOS and BIOS
 ; calls only promise to keep the low 16 bits of each register.
@@ -453,6 +454,9 @@ internals:
         dw      name_pause, cmd_pause
         dw      name_lh, cmd_lh
         dw      name_loadhigh, cmd_lh
+        dw      name_net, cmd_net
+        dw      name_ping, cmd_ping
+        dw      name_fetch, cmd_fetch
         dw      name_if, cmd_if
         dw      name_for, cmd_for
         dw      name_goto, cmd_goto
@@ -777,6 +781,9 @@ restart:
         mov     byte [child_running], 0
         mov     byte [for_active], 0
         call    undo_redirection
+        mov     byte [t_state], T_CLOSED        ; a network command cut short
+        call    net_close
+        call    http_free
         mov     dx, dta
         mov     ah, 1Ah
         int     21h
@@ -1067,7 +1074,7 @@ banner:
 ; Data
 ; ------------------------------------------------------------
 
-msg_banner      db 'Claude shell for DOS - phase 4 (386 real mode)', 13, 10
+msg_banner      db 'Claude shell for DOS - phase 5 (386 real mode)', 13, 10
                 db 'DOS ', 0
 msg_banner_name db 'Claude shell for DOS', 0
 msg_oem         db ', OEM ', 0
@@ -1134,6 +1141,9 @@ name_truename   db 'TRUENAME', 0
 name_pause      db 'PAUSE', 0
 name_lh         db 'LH', 0
 name_loadhigh   db 'LOADHIGH', 0
+name_net        db 'NET', 0
+name_ping       db 'PING', 0
+name_fetch      db 'FETCH', 0
 name_if         db 'IF', 0
 name_for        db 'FOR', 0
 name_goto       db 'GOTO', 0
@@ -1151,6 +1161,8 @@ delims_end:
 
 %include "batch.asm"
 %include "redir.asm"
+%include "net.asm"
+%include "tcp.asm"
 %include "cmds.asm"
 %include "dir.asm"
 %include "copy.asm"

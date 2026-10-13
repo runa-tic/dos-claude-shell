@@ -1,0 +1,15 @@
+@ECHO OFF
+REM Phase 5, under CLAUDE.COM as the only shell: its own TCP/IP.
+VER > C:\RESULT.TXT
+ECHO === NET >> C:\RESULT.TXT
+NET >> C:\RESULT.TXT
+ECHO === PING 10.0.2.2 >> C:\RESULT.TXT
+PING 10.0.2.2 >> C:\RESULT.TXT
+ECHO === FETCH from the shim >> C:\RESULT.TXT
+FETCH http://10.0.2.2:8765/v1/models >> C:\RESULT.TXT
+ECHO === FETCH 40 KB into BIG.TXT >> C:\RESULT.TXT
+FETCH http://10.0.2.2:8766/big.txt > C:\BIG.TXT
+ECHO === PING by name >> C:\RESULT.TXT
+PING example.com >> C:\RESULT.TXT
+ECHO === DONE >> C:\RESULT.TXT
+FDAPM POWEROFF
