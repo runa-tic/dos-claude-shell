@@ -5,7 +5,7 @@ real DOS (FreeDOS and MS-DOS 6.22) and talk to Claude over its own TCP/IP stack.
 sibling of ClauDOS: there everything under the shell was written from scratch; here DOS
 is real and only the shell is ours.
 
-**Status: phase 3, a usable DOS shell with batch files.** `CLAUDE.COM` (9 KB, about 15 KB resident with
+**Status: phase 4, a complete DOS shell.** `CLAUDE.COM` (9 KB, about 15 KB resident with
 its buffers and a 1 KB environment) boots as the only shell on FreeDOS and MS-DOS 6.22.
 It runs `.COM`, `.EXE` and batch files from the current directory or along `PATH`, in
 DOS's order, keeping their errorlevel. Ctrl-C ends the running program and offers to end
@@ -24,7 +24,15 @@ ERRORLEVEL | EXIST | ==`, `GOTO`, `CALL` (nested up to 8 deep), `FOR %%V IN (...
 with wildcards, `SHIFT`, `ECHO OFF` and `@`. A test batch file using all of it gives the
 same output under this shell as under MS-DOS's `COMMAND.COM`, blank lines included.
 
-Still to come: redirection and pipes in phase 4, then the network and Claude.
+Every line can use `<`, `>`, `>>` and `|`. Pipes go through temporary files in `%TEMP%`,
+as in DOS, and redirecting an `IF` or `FOR` line redirects the whole of it.
+
+It can replace `COMMAND.COM` completely: with `SHELL=\CLAUDE.COM /E:2048 /P=\FDAUTO.BAT`
+(or `SHELL=C:\CLAUDE.COM /P` on MS-DOS) it runs the system's real startup file, and the
+test batch files, the network check included, run under it with no other shell on the
+machine (`make roottest`, `make rootnet`, and their `-msdos` versions).
+
+Still to come: the network stack and Claude.
 
 ## Layout
 ```
@@ -33,6 +41,7 @@ src/claude.asm          the shell: start-up, the loop, running programs, batch f
 src/cmds.asm            the internal commands but DIR and COPY, which have files of their own
 src/dir.asm src/copy.asm
 src/batch.asm           batch files: % expansion, CALL, GOTO, SHIFT, IF, FOR
+src/redir.asm           redirection and pipes
 src/env.asm             the shell's own environment block
 src/util.asm            text, numbers, dates and file names
 image/freedos/          FDCONFIG.SYS and FDAUTO.BAT for FreeDOS; -claude variant boots our shell
@@ -45,6 +54,7 @@ tests/hello.asm         HELLO.COM: prints its command tail, memory and FCB; HELL
 tests/hellox.asm        HELLOX.EXE: a hand-made MZ executable
 tests/p2.bat            the internal commands, run by our shell and by the system's for comparison
 tests/p3.bat            the batch language, likewise (with p3sub.bat for CALL)
+tests/p4.bat            redirection and pipes, likewise; tests/upper.asm is a filter for them
 tests/*.bat, *.txt      batch files and input for the tests
 tools/fetch.sh          downloads FreeDOS 1.4 Lite, the NE2000 driver and mTCP, hash-checked
 tools/mkimage.py        a copy of a base disk image with files put onto it (mtools)
@@ -61,7 +71,9 @@ make run            # FreeDOS in a QEMU window, FreeCOM as the shell, CLAUDE.COM
 make nettest        # headless network check, prints C:\RESULT.TXT
 make shelltest      # headless: CLAUDE.COM as the only shell, typed at, screens printed
 make childtest      # headless: FreeCOM runs CLAUDE.COM /C ... as a child, C:\RESULT.TXT printed
-make cmdtest        # headless: tests/p2.bat under CLAUDE.COM and under FreeCOM, both printed
+make cmdtest        # headless: tests/p2-p4.bat under CLAUDE.COM and under FreeCOM, both printed
+make roottest       # headless: CLAUDE.COM the only shell, FDAUTO.BAT calls the child test
+make rootnet        # the same with the network check
 make dbx            # FreeDOS in DOSBox-X
 make nettest-dbx    # the network check in DOSBox-X, headless
 ```

@@ -37,7 +37,7 @@ NETFILES = $(PKG)/DRIVERS/CRYNWR/NE2000.COM=NET/NE2000.COM \
            $(PKG)/NET/mTCP/nc.exe=NET/NC.EXE
 
 .PHONY: all fetch freedos run nettest shelltest childtest cmdtest msdos run-msdos nettest-msdos \
-        shelltest-msdos childtest-msdos cmdtest-msdos dbx nettest-dbx childtest-dbx cmdtest-dbx clean
+        shelltest-msdos childtest-msdos cmdtest-msdos roottest rootnet roottest-msdos rootnet-msdos dbx nettest-dbx childtest-dbx cmdtest-dbx clean
 
 all: $(SHELL_COM)
 
@@ -47,20 +47,24 @@ $(BUILD):
 $(SHELL_COM): src/*.asm | $(BUILD)
 	nasm -f bin -i src/ -o $@ src/claude.asm
 
-# Test programs: HELLO.COM prints its tail and memory, HELLOX.EXE is a hand-made MZ.
+# Test programs: HELLO.COM prints its tail and memory, HELLOX.EXE is a hand-made MZ,
+# UPPER.COM a filter for pipes.
 $(BUILD)/hello.com: tests/hello.asm | $(BUILD)
 	nasm -f bin -o $@ $<
 
 $(BUILD)/hellox.exe: tests/hellox.asm | $(BUILD)
 	nasm -f bin -o $@ $<
 
-TESTPROGS = $(BUILD)/hello.com $(BUILD)/hellox.exe
-T_FILES = $(BUILD)/hello.com=T/HELLO.COM $(BUILD)/hellox.exe=T/HELLOX.EXE \
+$(BUILD)/upper.com: tests/upper.asm | $(BUILD)
+	nasm -f bin -o $@ $<
+
+TESTPROGS = $(BUILD)/hello.com $(BUILD)/hellox.exe $(BUILD)/upper.com
+T_FILES = $(BUILD)/hello.com=T/HELLO.COM $(BUILD)/hellox.exe=T/HELLOX.EXE $(BUILD)/upper.com=T/UPPER.COM \
           $(BUILD)/hello.com=T/PICK.COM $(BUILD)/hellox.exe=T/PICK.EXE \
           $(BUILD)/hellox.exe=T/PICK2.EXE tests/pick2.bat=T/PICK2.BAT \
           tests/sub.bat=T/SUB.BAT tests/slow.bat=T/SLOW.BAT \
           tests/input.txt=T/INPUT.TXT tests/noexit.txt=T/NOEXIT.TXT tests/startup.bat=STARTUP.BAT \
-          tests/p2.bat=T/P2.BAT tests/p3.bat=T/P3.BAT tests/p3sub.bat=T/P3SUB.BAT
+          tests/p2.bat=T/P2.BAT tests/p3.bat=T/P3.BAT tests/p3sub.bat=T/P3SUB.BAT tests/p4.bat=T/P4.BAT
 
 # What shelltest types: a program, EXIT (ignored, the shell is permanent), Ctrl-C in a
 # program and at the prompt, a bad drive, a batch file, Ctrl-C in a batch file, and a
@@ -123,10 +127,21 @@ shelltest: $(BUILD)/freedos.img $(TESTPROGS)
 # as the reference, each in an empty directory; both outputs are printed.
 cmdtest: $(BUILD)/freedos.img $(TESTPROGS)
 	$(MKIMAGE) $(BUILD)/freedos-test.img $< tests/cmds.bat=TEST.BAT $(T_FILES)
-	$(BOOT) $(BUILD)/freedos-test.img --timeout 120 --result OURS.TXT REF.TXT OURS3.TXT REF3.TXT
+	$(BOOT) $(BUILD)/freedos-test.img --timeout 120 --result OURS.TXT REF.TXT OURS3.TXT REF3.TXT OURS4.TXT REF4.TXT
 
 childtest: $(BUILD)/freedos.img $(TESTPROGS)
 	$(MKIMAGE) $(BUILD)/freedos-test.img $< tests/child.bat=TEST.BAT $(T_FILES)
+	$(BOOT) $(BUILD)/freedos-test.img --timeout 120 --result RESULT.TXT
+
+# CLAUDE.COM as the only shell, running the real startup file (FDAUTO.BAT, or
+# AUTOEXEC.BAT on MS-DOS), which calls the test: every redirection, errorlevel and
+# batch line in it is ours. roottest runs the child test, rootnet the network check.
+roottest: $(BUILD)/freedos.img $(TESTPROGS)
+	$(MKIMAGE) $(BUILD)/freedos-test.img $< image/freedos/fdconfig-root.sys=FDCONFIG.SYS tests/child.bat=TEST.BAT $(T_FILES)
+	$(BOOT) $(BUILD)/freedos-test.img --timeout 120 --result RESULT.TXT
+
+rootnet: $(BUILD)/freedos.img
+	$(MKIMAGE) $(BUILD)/freedos-test.img $< image/freedos/fdconfig-root.sys=FDCONFIG.SYS tests/net.bat=TEST.BAT
 	$(BOOT) $(BUILD)/freedos-test.img --timeout 120 --result RESULT.TXT
 
 # ---- MS-DOS 6.22: your own image, named in local.mk, never committed ----
@@ -156,10 +171,18 @@ shelltest-msdos: $(BUILD)/msdos.img $(TESTPROGS)
 
 cmdtest-msdos: $(BUILD)/msdos.img $(TESTPROGS)
 	$(MKIMAGE) $(BUILD)/msdos-test.img $< tests/cmds.bat=TEST.BAT $(T_FILES)
-	$(BOOT) $(BUILD)/msdos-test.img --timeout 120 --boot-wait 3 --keys '1' --result OURS.TXT REF.TXT OURS3.TXT REF3.TXT
+	$(BOOT) $(BUILD)/msdos-test.img --timeout 120 --boot-wait 3 --keys '1' --result OURS.TXT REF.TXT OURS3.TXT REF3.TXT OURS4.TXT REF4.TXT
 
 childtest-msdos: $(BUILD)/msdos.img $(TESTPROGS)
 	$(MKIMAGE) $(BUILD)/msdos-test.img $< tests/child.bat=TEST.BAT $(T_FILES)
+	$(BOOT) $(BUILD)/msdos-test.img --timeout 120 --boot-wait 3 --keys '1' --result RESULT.TXT
+
+roottest-msdos: $(BUILD)/msdos.img $(TESTPROGS)
+	$(MKIMAGE) $(BUILD)/msdos-test.img $< image/msdos/config-root.sys=CONFIG.SYS tests/child.bat=TEST.BAT $(T_FILES)
+	$(BOOT) $(BUILD)/msdos-test.img --timeout 120 --boot-wait 3 --keys '1' --result RESULT.TXT
+
+rootnet-msdos: $(BUILD)/msdos.img
+	$(MKIMAGE) $(BUILD)/msdos-test.img $< image/msdos/config-root.sys=CONFIG.SYS tests/net.bat=TEST.BAT
 	$(BOOT) $(BUILD)/msdos-test.img --timeout 120 --boot-wait 3 --keys '1' --result RESULT.TXT
 
 # ---- DOSBox-X: boots the same real-DOS images, NE2000 on its slirp network ----
@@ -183,7 +206,7 @@ cmdtest-dbx: $(BUILD)/freedos.img $(TESTPROGS)
 	$(MKIMAGE) $(BUILD)/dbx.img $< tests/cmds.bat=TEST.BAT $(T_FILES)
 	sed "s#%IMG%#$$PWD/$(BUILD)/dbx.img#" image/dosbox-x/boot.conf > $(BUILD)/dbx.conf
 	SDL_VIDEODRIVER=dummy perl -e 'alarm 150; exec @ARGV' dosbox-x -conf $(BUILD)/dbx.conf -silent > $(BUILD)/dbx.log 2>&1 || true
-	@for f in OURS.TXT REF.TXT OURS3.TXT REF3.TXT; do echo "===== $$f"; mtype -i $(BUILD)/dbx.img@@32256 ::/$$f | tr -d '\r'; done
+	@for f in OURS.TXT REF.TXT OURS3.TXT REF3.TXT OURS4.TXT REF4.TXT; do echo "===== $$f"; mtype -i $(BUILD)/dbx.img@@32256 ::/$$f | tr -d '\r'; done
 
 childtest-dbx: $(BUILD)/freedos.img $(TESTPROGS)
 	$(MKIMAGE) $(BUILD)/dbx.img $< tests/child.bat=TEST.BAT $(T_FILES)

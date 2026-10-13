@@ -661,7 +661,7 @@ cmd_break:
         mov     si, msg_break_off
 .say:   jmp     print_z
 .bad:   mov     si, msg_on_or_off
-        jmp     print_z
+        jmp     print_err
 
 ; VERIFY [ON | OFF]
 cmd_verify:

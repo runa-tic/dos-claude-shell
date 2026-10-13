@@ -1,7 +1,7 @@
 ; ============================================================
 ; CLAUDE.COM - a shell for DOS that talks to Claude.
 ;
-; Phase 3: a DOS shell. It reads a line, runs the program the
+; Phase 4: a DOS shell. It reads a line, runs the program the
 ; line names (a .COM, an .EXE or a batch file, looked for in the
 ; current directory and then along PATH), handles Ctrl-C and
 ; critical errors, and can be the system shell (SHELL= in
@@ -26,7 +26,8 @@
 ; A leading directory (COMMAND.COM's own location) is ignored.
 ;
 ; Batch files (batch.asm) have %0-%9, %VAR%, IF, GOTO, CALL,
-; FOR, SHIFT, ECHO OFF and '@', as in MS-DOS 6.22.
+; FOR, SHIFT, ECHO OFF and '@', as in MS-DOS 6.22. Every line can
+; use < > >> and | (redir.asm).
 ;
 ; 386 real mode: 32-bit registers are allowed, but DOS and BIOS
 ; calls only promise to keep the low 16 bits of each register.
@@ -72,6 +73,7 @@ start:
 
         mov     byte [echo_on], 1
         mov     byte [out_handle], 1
+        mov     dword [saved_std], 0FFFFFFFFh   ; nothing redirected
         call    parse_switches
         call    check_root
         mov     dx, dta
@@ -113,7 +115,7 @@ start:
         mov     byte [exit_after], 1
 .oneshot:
         mov     si, [oneshot]
-        call    execute_line
+        call    run_line
         jmp     main_loop
 
 .startup:
@@ -157,7 +159,7 @@ main_loop:
         jmp     .run
 .batch: call    batch_next
         jc      main_loop
-.run:   call    execute_line
+.run:   call    run_line
         jmp     main_loop
 .exit:  mov     byte [exit_after], 0
         call    do_exit
@@ -419,7 +421,7 @@ change_drive:
         cmp     al, bl
         je      .ok
 .bad:   mov     si, msg_bad_drive
-        jmp     print_z
+        jmp     print_err
 .ok:    ret
 
 internals:
@@ -774,6 +776,7 @@ restart:
         cld
         mov     byte [child_running], 0
         mov     byte [for_active], 0
+        call    undo_redirection
         mov     dx, dta
         mov     ah, 1Ah
         int     21h
@@ -1064,7 +1067,7 @@ banner:
 ; Data
 ; ------------------------------------------------------------
 
-msg_banner      db 'Claude shell for DOS - phase 3 (386 real mode)', 13, 10
+msg_banner      db 'Claude shell for DOS - phase 4 (386 real mode)', 13, 10
                 db 'DOS ', 0
 msg_banner_name db 'Claude shell for DOS', 0
 msg_oem         db ', OEM ', 0
@@ -1147,6 +1150,7 @@ delims          db 0, ' ', 9, 10, 13, '/', '<', '>', '|', '=', ',', ';', '+', '"
 delims_end:
 
 %include "batch.asm"
+%include "redir.asm"
 %include "cmds.asm"
 %include "dir.asm"
 %include "copy.asm"
