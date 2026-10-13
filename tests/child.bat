@@ -21,7 +21,7 @@ ECHO === 6 an extension typed, so PICK.EXE is HELLOX >> C:\RESULT.TXT
 C:\CLAUDE.COM /C pick.exe >> C:\RESULT.TXT
 ECHO === 7 a batch file along PATH >> C:\RESULT.TXT
 C:\CLAUDE.COM /C sub >> C:\RESULT.TXT
-ECHO === 8 not found, not a program, no such drive >> C:\RESULT.TXT
+ECHO === 8 not found, not a program, no such drive: errors go to stderr, so nothing >> C:\RESULT.TXT
 C:\CLAUDE.COM /C nosuch >> C:\RESULT.TXT
 C:\CLAUDE.COM /C C:\T\INPUT.TXT >> C:\RESULT.TXT
 C:\CLAUDE.COM /C Q: >> C:\RESULT.TXT

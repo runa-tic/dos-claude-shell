@@ -1,12 +1,19 @@
 ; ============================================================
 ; CLAUDE.COM - a shell for DOS that talks to Claude.
 ;
-; Phase 1: the shell core. It reads a line, runs the program the
+; Phase 2: a DOS shell. It reads a line, runs the program the
 ; line names (a .COM, an .EXE or a batch file, looked for in the
 ; current directory and then along PATH), handles Ctrl-C and
 ; critical errors, and can be the system shell (SHELL= in
-; CONFIG.SYS) with no COMMAND.COM anywhere. Internal commands so
-; far: EXIT, REM, and drive changes such as A:.
+; CONFIG.SYS) with no COMMAND.COM anywhere. Its own commands are
+; DIR, CD, MD, RD, COPY, DEL, REN, TYPE, ECHO, SET, PATH, PROMPT,
+; CLS, VER, VOL, DATE, TIME, BREAK, VERIFY, TRUENAME, PAUSE, LH,
+; EXIT, REM and drive changes such as A:. It keeps an environment
+; block of its own, which the programs it runs inherit.
+;
+; Source files: this one (start-up, the loop, running programs,
+; batch files, Ctrl-C and critical errors), cmds.asm, dir.asm and
+; copy.asm (the commands), env.asm (the environment), util.asm.
 ;
 ; Switches, as COMMAND.COM takes them:
 ;   /P[=file]  permanent; run the startup batch file (\AUTOEXEC.BAT
@@ -14,20 +21,26 @@
 ;   /D         skip the startup file
 ;   /C cmd     run one command, then exit with its errorlevel
 ;   /K cmd     run one command, then stay
-; A leading directory and /E:n are accepted and ignored for now.
+;   /E:n       an environment of n bytes (default 1024)
+; A leading directory (COMMAND.COM's own location) is ignored.
 ;
 ; Batch files run one line at a time, reopened for every line as
-; COMMAND.COM does; '@' hides a line and ':' lines are labels.
-; Their %1, IF, GOTO, CALL and the rest come in phase 3.
+; COMMAND.COM does; '@' hides a line, ':' lines are labels, and
+; ECHO OFF stops the echo. %1, IF, GOTO, CALL and the rest come in
+; phase 3.
 ;
 ; 386 real mode: 32-bit registers are allowed, but DOS and BIOS
 ; calls only promise to keep the low 16 bits of each register.
 ;
-; Build: nasm -f bin src/claude.asm -o build/claude.com
+; Build: nasm -f bin -i src/ src/claude.asm -o build/claude.com
 ; ============================================================
         cpu     386
         bits    16
         org     100h
+
+        section .bss                    ; every file's variables come after this
+bss_start:
+        section .text
 
 PSP_INT22       equ 0Ah         ; where DOS goes when this process ends
 PSP_INT23       equ 0Eh         ; Ctrl-C vector DOS restores at the end
@@ -58,12 +71,15 @@ start:
         mov     ah, 4Ah
         int     21h
 
+        mov     byte [echo_on], 1
+        mov     byte [out_handle], 1
         call    parse_switches
         call    check_root
-
         mov     dx, dta
         mov     ah, 1Ah
         int     21h
+        call    init_env
+        call    set_comspec
         mov     dx, on_break
         mov     ax, 2523h
         int     21h
@@ -141,10 +157,27 @@ main_loop:
         call    do_exit
         jmp     main_loop
 
-; Prompt, then a line from standard input into linebuf (ASCIIZ).
+; read_command: the prompt (unless ECHO is off), then a line into linebuf.
 read_command:
+        cmp     byte [echo_on], 0
+        je      .read
         call    show_prompt
-        mov     ax, 4400h               ; is standard input the console or a file?
+.read:  mov     di, linebuf
+        call    read_line
+        jnc     .got
+        call    do_exit                 ; input from a file has run out: as EXIT
+.got:   cmp     byte [linebuf], 0
+        jne     .done
+        mov     byte [no_blank], 1      ; an empty line: no blank line before the next prompt
+.done:  ret
+
+; read_line: a line from standard input into DI (ASCIIZ, at most LINE_MAX).
+; From the console, through DOS's line editing (and DOSKEY, if loaded);
+; from a file, a byte at a time up to the line feed, echoed as if typed.
+; CF set when a file has run out with nothing read.
+read_line:
+        mov     [rl_dest], di
+        mov     ax, 4400h               ; the console or a file?
         xor     bx, bx
         int     21h
         jc      .console
@@ -153,20 +186,17 @@ read_command:
 .console:
         mov     byte [inbuf], LINE_MAX + 1
         mov     dx, inbuf
-        mov     ah, 0Ah                 ; DOS line editing (and DOSKEY, if loaded)
+        mov     ah, 0Ah
         int     21h
-        mov     si, crlf
-        call    print_z
+        call    newline
         movzx   cx, byte [inbuf + 1]
         mov     si, inbuf + 2
-        mov     di, linebuf
+        mov     di, [rl_dest]
         rep     movsb
         mov     byte [di], 0
-        jmp     .got
-
-        ; From a file: a byte at a time up to the line feed, echoed as if
-        ; typed. At the end of the file, leave as if EXIT had been typed.
-.file:  mov     di, linebuf
+        clc
+        ret
+.file:  mov     di, [rl_dest]
 .byte:  push    di
         mov     dx, inbuf
         mov     cx, 1
@@ -184,50 +214,104 @@ read_command:
         je      .eof
         cmp     al, 13
         je      .byte
-        cmp     di, linebuf + LINE_MAX
+        mov     bx, di
+        sub     bx, [rl_dest]
+        cmp     bx, LINE_MAX
         jae     .byte
         stosb
         jmp     .byte
-.eof:   cmp     di, linebuf
-        jne     .line                   ; a last line with no line feed still runs
+.eof:   cmp     di, [rl_dest]
+        jne     .line                   ; a last line with no line feed still counts
         mov     byte [di], 0
-        mov     si, crlf
-        call    print_z
-        call    do_exit
-        jmp     .got
+        call    newline
+        stc
+        ret
 .line:  mov     byte [di], 0
-        mov     si, linebuf
+        mov     si, [rl_dest]
         call    print_z
-        mov     si, crlf
-        call    print_z
-.got:   cmp     byte [linebuf], 0
-        jne     .done
-        mov     byte [no_blank], 1      ; an empty line: no blank line before the next prompt
-.done:  ret
+        call    newline
+        clc
+        ret
 
-; The prompt, $P$G for now: the current drive and directory.
+; show_prompt: the PROMPT variable's text, $P$G if there is none.
+; $P drive and directory, $N drive, $G > $L < $B | $Q = $$ $,
+; $T time, $D date, $V DOS version, $_ new line, $E escape, $H backspace.
 show_prompt:
         cmp     byte [no_blank], 0
         mov     byte [no_blank], 0
-        jne     .drive
-        mov     si, crlf
+        jne     .text
+        call    newline
+.text:  mov     si, name_prompt
+        mov     di, promptbuf
+        mov     cx, PROMPTBUF_SIZE - 1
+        call    env_get
+        jc      .default
+        cmp     byte [promptbuf], 0
+        jne     .go
+.default:
+        mov     si, default_prompt
+        mov     di, promptbuf
+        call    append_z
+.go:    mov     si, promptbuf
+.next:  lodsb
+        test    al, al
+        jz      .done
+        cmp     al, '$'
+        je      .code
+.char:  mov     dl, al
+        call    putc
+        jmp     .next
+.code:  lodsb
+        test    al, al
+        jz      .done
+        call    upcase
+        mov     di, prompt_chars        ; the codes that stand for one character
+.find:  cmp     byte [di], 0
+        je      .special
+        cmp     al, [di]
+        je      .one
+        add     di, 2
+        jmp     .find
+.one:   mov     al, [di + 1]
+        jmp     .char
+.special:
+        push    si
+        cmp     al, 'P'
+        je      .p
+        cmp     al, 'N'
+        je      .n
+        cmp     al, 'T'
+        je      .t
+        cmp     al, 'D'
+        je      .d
+        cmp     al, 'V'
+        je      .v
+        cmp     al, '_'
+        jne     .after
+        call    newline
+        jmp     .after
+.p:     xor     al, al
+        call    print_cwd
+        jnc     .after
+        mov     si, cwdbuf              ; a drive that failed: its letter at least
         call    print_z
-.drive: mov     ah, 19h
+        jmp     .after
+.n:     mov     ah, 19h
         int     21h
         add     al, 'A'
-        mov     [cwdbuf], al
-        mov     byte [cwdbuf + 1], ':'
-        mov     byte [cwdbuf + 2], '\'
-        mov     si, cwdbuf + 3
-        xor     dl, dl
-        mov     ah, 47h
-        int     21h
-        jnc     .show
-        mov     byte [cwdbuf + 3], 0
-.show:  mov     si, cwdbuf
+        mov     dl, al
+        call    putc
+        jmp     .after
+.t:     xor     bl, bl
+        call    print_time
+        jmp     .after
+.d:     call    print_date
+        jmp     .after
+.v:     mov     si, msg_banner_name
         call    print_z
-        mov     dl, '>'
-        jmp     putc
+.after: pop     si
+        jmp     .next
+.done:  ret
 
 ; EXIT, and the end of /C: a permanent shell stays.
 do_exit:
@@ -309,7 +393,7 @@ execute_line:
 
 bad_command:
         mov     si, msg_bad_command
-        jmp     print_z
+        jmp     print_err
 
 change_drive:
         mov     dl, [cmdname]
@@ -328,6 +412,34 @@ change_drive:
 .ok:    ret
 
 internals:
+        dw      name_dir, cmd_dir
+        dw      name_cd, cmd_cd
+        dw      name_chdir, cmd_cd
+        dw      name_md, cmd_md
+        dw      name_mkdir, cmd_md
+        dw      name_rd, cmd_rd
+        dw      name_rmdir, cmd_rd
+        dw      name_copy, cmd_copy
+        dw      name_del, cmd_del
+        dw      name_erase, cmd_del
+        dw      name_ren, cmd_ren
+        dw      name_rename, cmd_ren
+        dw      name_type, cmd_type
+        dw      name_echo, cmd_echo
+        dw      name_set, cmd_set
+        dw      name_path_cmd, cmd_path
+        dw      name_prompt_cmd, cmd_prompt
+        dw      name_cls, cmd_cls
+        dw      name_ver, cmd_ver
+        dw      name_vol, cmd_vol
+        dw      name_date, cmd_date
+        dw      name_time, cmd_time
+        dw      name_break, cmd_break
+        dw      name_verify, cmd_verify
+        dw      name_truename, cmd_truename
+        dw      name_pause, cmd_pause
+        dw      name_lh, cmd_lh
+        dw      name_loadhigh, cmd_lh
         dw      name_exit, cmd_exit
         dw      name_rem, cmd_rem
         dw      0
@@ -610,13 +722,15 @@ run_program:
         mov     si, msg_bad_format
         cmp     ax, 11
         je      print_z
+        mov     byte [out_handle], 2
         push    ax
         mov     si, msg_exec_error
         call    print_z
         pop     ax
         call    put_dec
-        mov     si, crlf
-        jmp     print_z
+        call    newline
+        mov     byte [out_handle], 1
+        ret
 
 ; ------------------------------------------------------------
 ; Batch files
@@ -636,11 +750,7 @@ start_batch:
         stosb
         test    al, al
         jnz     .copy
-.named: cmp     byte [batch_active], 0
-        jne     .chained
-        mov     byte [batch_echo], 1
-.chained:
-        mov     dword [batch_pos], 0
+.named: mov     dword [batch_pos], 0
         mov     byte [batch_active], 1
         ret
 
@@ -704,7 +814,7 @@ batch_next:
         jz      .skip
         cmp     al, ':'
         je      .skip
-        mov     bl, [batch_echo]
+        mov     bl, [echo_on]
         cmp     al, '@'
         jne     .echo
         xor     bl, bl
@@ -723,9 +833,15 @@ batch_next:
         ret
 .missing:
         mov     si, msg_batch_missing
-        call    print_z
-.end:   mov     byte [batch_active], 0
+        call    print_err
+.end:   call    end_batch
 .skip:  stc
+        ret
+
+; end_batch: no batch file any more; ECHO is on again at the prompt.
+end_batch:
+        mov     byte [batch_active], 0
+        mov     byte [echo_on], 1
         ret
 
 ask_terminate:
@@ -747,7 +863,7 @@ ask_terminate:
         pop     ax
         cmp     al, 'Y'
         jne     .done
-        mov     byte [batch_active], 0
+        call    end_batch
 .done:  ret
 
 ; ------------------------------------------------------------
@@ -930,7 +1046,7 @@ on_critical:
 parse_switches:
         movzx   cx, byte [PSP_TAIL]
         mov     si, PSP_TAIL + 1
-        mov     di, switches
+        mov     di, cmd_tail
 .copy:  jcxz    .copied
         lodsb
         cmp     al, 13
@@ -940,13 +1056,13 @@ parse_switches:
         jmp     .copy
 .copied:
         mov     byte [di], 0
-        mov     si, switches
+        mov     si, cmd_tail
 .next:  call    skip_blanks
         lodsb
         test    al, al
         jz      .done
         cmp     al, '/'
-        jne     .skip_word
+        jne     .word
         lodsb
         call    upcase
         cmp     al, 'C'
@@ -955,6 +1071,8 @@ parse_switches:
         je      .oneshot
         cmp     al, 'D'
         je      .d
+        cmp     al, 'E'
+        je      .e
         cmp     al, 'P'
         jne     .skip_word
         mov     byte [permanent], 1
@@ -978,12 +1096,35 @@ parse_switches:
         jmp     .next
 .d:     mov     byte [no_startup], 1
         jmp     .skip_word
+.e:     cmp     byte [si], ':'
+        jne     .skip_word
+        inc     si
+        call    parse_num
+        jc      .skip_word
+        mov     [env_want], ax
+        jmp     .skip_word
 .oneshot:
         mov     [mode], al              ; the rest of the line is the command
         call    skip_blanks
         mov     [oneshot], si
 .done:  ret
-.skip_word:                             ; a directory, /E:n, anything else
+.word:  dec     si                      ; the first word: where we live, as
+        cmp     byte [home_dir], 0      ; SHELL=C:\COMMAND.COM C:\ /P gives it
+        jne     .skip_word
+        mov     di, home_dir
+.w:     mov     al, [si]
+        cmp     al, ' '
+        jbe     .w_end
+        cmp     al, '/'
+        je      .w_end
+        inc     si
+        cmp     di, home_dir + NAME_MAX
+        jae     .w
+        stosb
+        jmp     .w
+.w_end: mov     byte [di], 0
+        jmp     .next
+.skip_word:                             ; /E:n without a number, anything else
         mov     al, [si]
         cmp     al, ' '
         jbe     .next
@@ -1023,28 +1164,7 @@ check_root:
 banner:
         mov     si, msg_banner
         call    print_z
-        mov     ah, 30h                 ; AL = major, AH = minor, BH = OEM number
-        int     21h
-        push    bx
-        push    ax
-        movzx   ax, al
-        call    put_dec
-        mov     dl, '.'
-        call    putc
-        pop     ax
-        movzx   ax, ah
-        cmp     ax, 10
-        jae     .minor
-        push    ax
-        mov     dl, '0'
-        call    putc
-        pop     ax
-.minor: call    put_dec
-        mov     si, msg_oem
-        call    print_z
-        pop     bx
-        mov     al, bh
-        call    put_hex8
+        call    print_dos_version
         mov     si, msg_by_program
         cmp     byte [by_dos], 0
         je      .by
@@ -1058,121 +1178,12 @@ banner:
         jmp     print_z
 
 ; ------------------------------------------------------------
-; Small helpers
-; ------------------------------------------------------------
-
-; skip_blanks: SI past spaces, tabs and line feeds.
-skip_blanks:
-        mov     al, [si]
-        cmp     al, ' '
-        je      .skip
-        cmp     al, 9
-        je      .skip
-        cmp     al, 10
-        jne     .done
-.skip:  inc     si
-        jmp     skip_blanks
-.done:  ret
-
-; is_delim: ZF set if AL ends a command name.
-is_delim:
-        push    cx
-        push    di
-        mov     di, delims
-        mov     cx, delims_end - delims
-        repne   scasb
-        pop     di
-        pop     cx
-        ret
-
-upcase:
-        cmp     al, 'a'
-        jb      .done
-        cmp     al, 'z'
-        ja      .done
-        sub     al, 20h
-.done:  ret
-
-; print_z: SI = ASCIIZ string, to standard output.
-print_z:
-        push    ax
-        push    bx
-        push    cx
-        push    dx
-        push    di
-        mov     di, si
-        xor     al, al
-        mov     cx, 0FFFFh
-        repne   scasb
-        not     cx
-        dec     cx
-        mov     dx, si
-        mov     bx, 1
-        mov     ah, 40h
-        int     21h
-        pop     di
-        pop     dx
-        pop     cx
-        pop     bx
-        pop     ax
-        ret
-
-; DL = character
-putc:
-        mov     ah, 02h
-        int     21h
-        ret
-
-; The same for the critical error handler, which may not use AH=40h.
-con_z:  lodsb
-        test    al, al
-        jz      .done
-        mov     dl, al
-        call    con_c
-        jmp     con_z
-.done:  ret
-
-con_c:  mov     ah, 02h
-        int     21h
-        ret
-
-; AX = number, printed in decimal
-put_dec:
-        mov     bx, 10
-        xor     cx, cx
-.div:   xor     dx, dx
-        div     bx
-        push    dx
-        inc     cx
-        test    ax, ax
-        jnz     .div
-.out:   pop     dx
-        add     dl, '0'
-        call    putc
-        loop    .out
-        ret
-
-; AL = byte, printed as two hex digits
-put_hex8:
-        push    ax
-        shr     al, 4
-        call    .nibble
-        pop     ax
-        and     al, 0Fh
-.nibble:
-        add     al, '0'
-        cmp     al, '9'
-        jbe     .digit
-        add     al, 7
-.digit: mov     dl, al
-        jmp     putc
-
-; ------------------------------------------------------------
 ; Data
 ; ------------------------------------------------------------
 
-msg_banner      db 'Claude shell for DOS - phase 1 (386 real mode)', 13, 10
+msg_banner      db 'Claude shell for DOS - phase 2 (386 real mode)', 13, 10
                 db 'DOS ', 0
+msg_banner_name db 'Claude shell for DOS', 0
 msg_oem         db ', OEM ', 0
 msg_by_dos      db ', started by DOS', 0
 msg_by_program  db ', started by a program', 0
@@ -1209,19 +1220,54 @@ ce10            db 'Write fault', 0
 ce11            db 'Read fault', 0
 ce12            db 'General failure', 0
 
+name_dir        db 'DIR', 0
+name_cd         db 'CD', 0
+name_chdir      db 'CHDIR', 0
+name_md         db 'MD', 0
+name_mkdir      db 'MKDIR', 0
+name_rd         db 'RD', 0
+name_rmdir      db 'RMDIR', 0
+name_copy       db 'COPY', 0
+name_del        db 'DEL', 0
+name_erase      db 'ERASE', 0
+name_ren        db 'REN', 0
+name_rename     db 'RENAME', 0
+name_type       db 'TYPE', 0
+name_echo       db 'ECHO', 0
+name_set        db 'SET', 0
+name_path_cmd   db 'PATH', 0
+name_prompt_cmd db 'PROMPT', 0
+name_cls        db 'CLS', 0
+name_ver        db 'VER', 0
+name_vol        db 'VOL', 0
+name_date       db 'DATE', 0
+name_time       db 'TIME', 0
+name_break      db 'BREAK', 0
+name_verify     db 'VERIFY', 0
+name_truename   db 'TRUENAME', 0
+name_pause      db 'PAUSE', 0
+name_lh         db 'LH', 0
+name_loadhigh   db 'LOADHIGH', 0
 name_exit       db 'EXIT', 0
 name_rem        db 'REM', 0
+default_prompt  db '$P$G', 0
+prompt_chars    db 'G>', 'L<', 'B|', 'Q=', '$$', 'E', 27, 'H', 8, 0
 default_startup db '\AUTOEXEC.BAT', 0
 exts            db 'COM', 0, 'EXE', 0, 'BAT', 0
 dot_exts        db '.COM', 0, '.EXE', 0, '.BAT', 0
 delims          db 0, ' ', 9, 10, 13, '/', '<', '>', '|', '=', ',', ';', '+', '"'
 delims_end:
 
+%include "cmds.asm"
+%include "dir.asm"
+%include "copy.asm"
+%include "env.asm"
+%include "util.asm"
+
 ; ------------------------------------------------------------
 ; Uninitialised data, cleared at start-up; the stack is last.
 ; ------------------------------------------------------------
         section .bss
-bss_start:
 permanent       resb 1
 want_startup    resb 1
 no_startup      resb 1
@@ -1235,7 +1281,7 @@ has_path        resb 1
 ext_type        resb 1
 prog_type       resb 1
 batch_active    resb 1
-batch_echo      resb 1
+echo_on         resb 1
 crit_flags      resb 1
 crit_drive      resb 1
 crit_failed     resb 1          ; a critical error in our own call was answered Fail
@@ -1248,6 +1294,7 @@ tok_end         resw 1
 path_pos        resw 1
 ext_at          resw 1
 saved_sp        resw 1
+rl_dest         resw 1
 
 param_block:
 pb_env          resw 1
@@ -1255,8 +1302,9 @@ pb_tail         resd 1
 pb_fcb1         resd 1
 pb_fcb2         resd 1
 
-switches        resb 130
+cmd_tail        resb 130
 startup_name    resb NAME_MAX + 2
+home_dir        resb NAME_MAX + 2
 inbuf           resb LINE_MAX + 4
 linebuf         resb LINE_MAX + 2
 cmdname         resb NAME_MAX + 2
@@ -1264,7 +1312,8 @@ dirbuf          resb NAME_MAX + 2
 progpath        resb 2 * NAME_MAX + 8
 tailbuf         resb LINE_MAX + 4
 batch_name      resb 130
-cwdbuf          resb NAME_MAX + 8
+PROMPTBUF_SIZE  equ 130
+promptbuf       resb PROMPTBUF_SIZE
 dta             resb 44
 fcb1            resb 37
 fcb2            resb 37

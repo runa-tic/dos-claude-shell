@@ -36,16 +36,16 @@ NETFILES = $(PKG)/DRIVERS/CRYNWR/NE2000.COM=NET/NE2000.COM \
            $(PKG)/NET/mTCP/htget.exe=NET/HTGET.EXE \
            $(PKG)/NET/mTCP/nc.exe=NET/NC.EXE
 
-.PHONY: all fetch freedos run nettest shelltest childtest msdos run-msdos nettest-msdos \
-        shelltest-msdos childtest-msdos dbx nettest-dbx childtest-dbx clean
+.PHONY: all fetch freedos run nettest shelltest childtest cmdtest msdos run-msdos nettest-msdos \
+        shelltest-msdos childtest-msdos cmdtest-msdos dbx nettest-dbx childtest-dbx cmdtest-dbx clean
 
 all: $(SHELL_COM)
 
 $(BUILD):
 	mkdir -p $(BUILD)
 
-$(SHELL_COM): src/claude.asm | $(BUILD)
-	nasm -f bin -o $@ $<
+$(SHELL_COM): src/*.asm | $(BUILD)
+	nasm -f bin -i src/ -o $@ src/claude.asm
 
 # Test programs: HELLO.COM prints its tail and memory, HELLOX.EXE is a hand-made MZ.
 $(BUILD)/hello.com: tests/hello.asm | $(BUILD)
@@ -59,7 +59,8 @@ T_FILES = $(BUILD)/hello.com=T/HELLO.COM $(BUILD)/hellox.exe=T/HELLOX.EXE \
           $(BUILD)/hello.com=T/PICK.COM $(BUILD)/hellox.exe=T/PICK.EXE \
           $(BUILD)/hellox.exe=T/PICK2.EXE tests/pick2.bat=T/PICK2.BAT \
           tests/sub.bat=T/SUB.BAT tests/slow.bat=T/SLOW.BAT \
-          tests/input.txt=T/INPUT.TXT tests/noexit.txt=T/NOEXIT.TXT tests/startup.bat=STARTUP.BAT
+          tests/input.txt=T/INPUT.TXT tests/noexit.txt=T/NOEXIT.TXT tests/startup.bat=STARTUP.BAT \
+          tests/p2.bat=T/P2.BAT
 
 # What shelltest types: a program, EXIT (ignored, the shell is permanent), Ctrl-C in a
 # program and at the prompt, a bad drive, a batch file, Ctrl-C in a batch file, and a
@@ -70,8 +71,14 @@ T_FILES = $(BUILD)/hello.com=T/HELLO.COM $(BUILD)/hellox.exe=T/HELLOX.EXE \
 K1 = t\hello typed{ret}{wait}exit{ret}t\hello wait{ret}{wait}{key:ctrl-c}{wait}
 K2 = abc{key:ctrl-c}{wait}q:{ret}{wait}t\sub{ret}{wait}{wait}{screen}
 K3 = t\slow{ret}{wait}{wait}{key:ctrl-c}{wait}y{wait}{wait}a:{ret}{wait}{wait}{wait}{wait}{wait}{wait}f{wait}{wait}
-K4 = hello{ret}{wait}{wait}{wait}{wait}{wait}{wait}a{wait}{wait}{wait}{wait}{wait}{wait}f{wait}{wait}c:{ret}{wait}t\hello back{ret}{wait}
-ROOT_KEYS = $(K1)$(K2)$(K3)$(K4)
+K4 = hello{ret}{wait}{wait}{wait}{wait}{wait}{wait}a{wait}{wait}{wait}{wait}{wait}{wait}f{wait}{wait}c:{ret}{wait}t\hello back{ret}{wait}{screen}
+# Then phase 2 at the keyboard: CLS, SET at the root (COMSPEC is us), PROMPT codes ($$ is
+# Make's way of writing $),
+# DATE with a bad date first, TIME, COPY CON ended by Ctrl-Z, TYPE, ECHO OFF at the prompt.
+K5 = cls{ret}set{ret}{wait}prompt $$n$$q$$t$$g{ret}date{ret}{wait}13-45-99{ret}{wait}{ret}{wait}time{ret}{wait}{ret}{wait}{screen}
+K6 = prompt{ret}cls{ret}copy con t\typed.txt{ret}{wait}first line{ret}second line{ret}{key:ctrl-z}{ret}{wait}{wait}
+K7 = type t\typed.txt{ret}{wait}echo off{ret}ver{ret}{wait}echo on{ret}dir t\*.txt /b{ret}{wait}
+ROOT_KEYS = $(K1)$(K2)$(K3)$(K4)$(K5)$(K6)$(K7)
 
 fetch:
 	sh tools/fetch.sh
@@ -110,7 +117,13 @@ nettest: $(BUILD)/freedos.img
 
 shelltest: $(BUILD)/freedos.img $(TESTPROGS)
 	$(MKIMAGE) $(BUILD)/freedos-test.img $< image/freedos/fdconfig-claude.sys=FDCONFIG.SYS $(T_FILES)
-	$(BOOT) $(BUILD)/freedos-test.img --timeout 90 --keys '$(ROOT_KEYS)' --screen
+	$(BOOT) $(BUILD)/freedos-test.img --timeout 130 --keys '$(ROOT_KEYS)' --screen
+
+# The internal commands: tests/p2.bat run by CLAUDE.COM, then by the system's own shell
+# as the reference, each in an empty directory; both outputs are printed.
+cmdtest: $(BUILD)/freedos.img $(TESTPROGS)
+	$(MKIMAGE) $(BUILD)/freedos-test.img $< tests/cmds.bat=TEST.BAT $(T_FILES)
+	$(BOOT) $(BUILD)/freedos-test.img --timeout 120 --result OURS.TXT REF.TXT
 
 childtest: $(BUILD)/freedos.img $(TESTPROGS)
 	$(MKIMAGE) $(BUILD)/freedos-test.img $< tests/child.bat=TEST.BAT $(T_FILES)
@@ -138,8 +151,12 @@ nettest-msdos: $(BUILD)/msdos.img
 
 shelltest-msdos: $(BUILD)/msdos.img $(TESTPROGS)
 	$(MKIMAGE) $(BUILD)/msdos-test.img $< image/msdos/config-claude.sys=CONFIG.SYS $(T_FILES)
-	$(BOOT) $(BUILD)/msdos-test.img --timeout 100 --boot-wait 3 \
+	$(BOOT) $(BUILD)/msdos-test.img --timeout 140 --boot-wait 3 \
 	  --keys '1{wait}{wait}{wait}{wait}{wait}{wait}$(ROOT_KEYS)' --screen
+
+cmdtest-msdos: $(BUILD)/msdos.img $(TESTPROGS)
+	$(MKIMAGE) $(BUILD)/msdos-test.img $< tests/cmds.bat=TEST.BAT $(T_FILES)
+	$(BOOT) $(BUILD)/msdos-test.img --timeout 120 --boot-wait 3 --keys '1' --result OURS.TXT REF.TXT
 
 childtest-msdos: $(BUILD)/msdos.img $(TESTPROGS)
 	$(MKIMAGE) $(BUILD)/msdos-test.img $< tests/child.bat=TEST.BAT $(T_FILES)
@@ -161,6 +178,12 @@ nettest-dbx: $(BUILD)/freedos.img
 	sed "s#%IMG%#$$PWD/$(BUILD)/dbx.img#" image/dosbox-x/boot.conf > $(BUILD)/dbx.conf
 	SDL_VIDEODRIVER=dummy perl -e 'alarm 150; exec @ARGV' dosbox-x -conf $(BUILD)/dbx.conf -silent > $(BUILD)/dbx.log 2>&1 || true
 	mtype -i $(BUILD)/dbx.img@@32256 ::/RESULT.TXT | tr -d '\r'
+
+cmdtest-dbx: $(BUILD)/freedos.img $(TESTPROGS)
+	$(MKIMAGE) $(BUILD)/dbx.img $< tests/cmds.bat=TEST.BAT $(T_FILES)
+	sed "s#%IMG%#$$PWD/$(BUILD)/dbx.img#" image/dosbox-x/boot.conf > $(BUILD)/dbx.conf
+	SDL_VIDEODRIVER=dummy perl -e 'alarm 150; exec @ARGV' dosbox-x -conf $(BUILD)/dbx.conf -silent > $(BUILD)/dbx.log 2>&1 || true
+	@for f in OURS.TXT REF.TXT; do echo "===== $$f"; mtype -i $(BUILD)/dbx.img@@32256 ::/$$f | tr -d '\r'; done
 
 childtest-dbx: $(BUILD)/freedos.img $(TESTPROGS)
 	$(MKIMAGE) $(BUILD)/dbx.img $< tests/child.bat=TEST.BAT $(T_FILES)

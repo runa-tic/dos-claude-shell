@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Boot a DOS disk image headless in QEMU, optionally type at it, and report.
 
-    boot.py IMAGE [--timeout S] [--keys TEXT] [--screen] [--result DOSPATH]
+    boot.py IMAGE [--timeout S] [--keys TEXT] [--screen] [--result DOSPATH...]
 
 The machine runs until it powers itself off (a test batch file ends with
 FDAPM POWEROFF) or the timeout passes. --keys types at it once it has booted:
 {ret} is Enter, {wait} a one-second pause, {key:ctrl-c} any QEMU key name, and
 {screen} takes a snapshot of the screen there, printed at the end. --screen prints the 80x25 text
 screen as it was at the end, which needs the timeout to end the run: a machine
-that powered off has no screen left. --result prints a file the run left on
+that powered off has no screen left. --result prints files the run left on
 the disk, read back with mtools. Every frame on the network is captured to
 build/net.pcap (tools/pcap.py prints it).
 """
@@ -36,7 +36,7 @@ def main():
     p.add_argument("--boot-wait", type=float, default=6, help="seconds before typing")
     p.add_argument("--keys", default="")
     p.add_argument("--screen", action="store_true")
-    p.add_argument("--result")
+    p.add_argument("--result", nargs="+", default=[])
     a = p.parse_args()
 
     vga = os.path.join(BUILD, "vga.bin")
@@ -104,10 +104,12 @@ def main():
         while rows and not rows[-1]:
             rows.pop()
         print("\n".join(rows))
-    if a.result:
-        r = subprocess.run(["mtype", "-i", f"{a.image}@@{partition_offset(a.image)}", "::/" + a.result],
+    for name in a.result:
+        r = subprocess.run(["mtype", "-i", f"{a.image}@@{partition_offset(a.image)}", "::/" + name],
                            capture_output=True, text=True, errors="replace")
-        print(r.stdout.replace("\r", "") if r.returncode == 0 else f"[boot] no {a.result}: {r.stderr.strip()}")
+        if len(a.result) > 1:
+            print(f"[boot] ===== {name}")
+        print(r.stdout.replace("\r", "") if r.returncode == 0 else f"[boot] no {name}: {r.stderr.strip()}")
 
 
 if __name__ == "__main__":
