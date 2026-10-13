@@ -1,0 +1,9 @@
+build/
+downloads/
+logs/
+*.img
+*.zip
+.DS_Store
+local.mk
+__pycache__/
+*.pyc
