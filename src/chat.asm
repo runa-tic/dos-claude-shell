@@ -15,7 +15,7 @@
 BODY_AT         equ 1024
 HIST_PARAS      equ 0600h       ; 24 KB of conversation
 HIST_MAX        equ HIST_PARAS * 16
-PACE_MS         equ 5           ; an answer on the screen: about 200 characters a second
+PACE_MS         equ 40          ; an answer on the screen: about 25 words a second
 TEXT_AT         equ 8000h       ; where decoded text goes in req_seg
 TEXT_MAX        equ 7FF0h
 MAX_STEPS       equ 8           ; requests in one turn (tools: phase 7)
@@ -52,7 +52,7 @@ claude_ready:
         mov     cx, NAME_MAX
         call    cfg_get
         jc      .no
-        mov     word [pace_ms], PACE_MS ; pace=n: milliseconds a character
+        mov     word [pace_ms], PACE_MS ; pace=n: milliseconds a word
         mov     si, key_pace
         mov     di, pace_buf
         mov     cx, 8
@@ -582,8 +582,8 @@ err_newline:
         jmp     print_err
 
 ; print_wrapped: the text at FS:SI, words wrapped at 80 columns, line
-; feeds as new lines. On the screen it comes out a character at a
-; time, as if Claude were typing it (pace).
+; feeds as new lines. On the screen it comes out a word at a time,
+; as if it were arriving as Claude writes it (pace).
 print_wrapped:
         mov     byte [wrap_col], 0
         call    pace_start
@@ -602,7 +602,6 @@ print_wrapped:
         jae     .next                   ; at the edge a space is the line break
         mov     dl, ' '
         call    putc
-        call    pace
         inc     byte [wrap_col]
         jmp     .next
 .word:  mov     bx, si                  ; how long is it?
@@ -623,13 +622,13 @@ print_wrapped:
         call    .newline
 .fits:  mov     dl, [fs:si]
         call    putc
-        call    pace
         inc     si
         inc     byte [wrap_col]
         cmp     byte [wrap_col], 80     ; a word longer than a line breaks anywhere
         jb      .more
         call    .newline
 .more:  loop    .fits
+        call    pace
         jmp     .next
 .end:   cmp     byte [wrap_col], 0
         je      .done
@@ -655,7 +654,7 @@ pace_start:
         mov     byte [pace_on], 1
 .done:  ret
 
-; pace: wait pace_ms after a character. A key pressed (left there for
+; pace: wait pace_ms after a word. A key pressed (left there for
 ; the prompt) or a BIOS that cannot wait ends it: the rest at once.
 pace:   cmp     byte [pace_on], 0
         je      .done
