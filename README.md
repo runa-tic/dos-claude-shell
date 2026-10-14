@@ -40,7 +40,9 @@ make play-bochs     # MS-DOS 6.22 in Bochs (play-bochs-fd for FreeDOS)
 ```
 Homebrew's Bochs has no network card, so the first `make play-bochs` builds Bochs 3.0
 with the NE2000 into `build/bochs` (`tools/build-bochs.sh`, a few minutes).
-Each starts from a fresh copy of the image (`build/play.img`), so do anything to it. Type
+Each starts from a fresh copy of the image (`build/play.img`), so do anything to it.
+The shell is started with `/L` there, and the emulator writes COM1 to
+`logs/console-<date>-<time>.log`: a transcript of the session. Type
 DOS commands as usual; type a question, or anything that is not a command, and it goes to
 Claude. `ASK question` asks even when the line starts with a command's name, `NEW`
 forgets the conversation, `NET` shows the network, `PING` and `FETCH` use it.
@@ -49,7 +51,8 @@ forgets the conversation, `NET` shows the network, `PING` and `FETCH` use it.
 **A DOS shell.** It runs `.COM`, `.EXE` and batch files from the current directory or
 along `PATH`, in DOS's order, keeping their errorlevel. Ctrl-C ends the running program
 and offers to end a batch file. A critical error asks Abort/Retry/Ignore/Fail, offering
-only what DOS allows. `/P[=file]`, `/C`, `/K`, `/D` and `/E:n` work as in `COMMAND.COM`.
+only what DOS allows. `/P[=file]`, `/C`, `/K`, `/D` and `/E:n` work as in `COMMAND.COM`; `/L` also copies
+everything DOS writes to the console, and what is typed, to COM1.
 Started by DOS it is permanent, and sets `COMSPEC` to itself so programs that shell out
 come back to it. Its environment is its own block, inherited by the programs it runs.
 

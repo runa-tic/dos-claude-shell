@@ -27,7 +27,12 @@ SHELL_COM := $(BUILD)/claude.com
 MKIMAGE := python3 tools/mkimage.py
 BOOT    := python3 tools/boot.py
 BOCHS   := $(BUILD)/bochs/bin/bochs
-BOCHSRC  = sed -e "s\#%IMG%\#$$PWD/$(1)\#" -e "s\#%LOG%\#$$PWD/$(BUILD)/bochs.log\#" -e "s\#%DISPLAY%\#$(2)\#" image/bochs/bochsrc
+# The root configs start the shell with /L, which copies the console to COM1;
+# each emulator writes COM1 to a file: logs/console-<time>.log when playing.
+CONLOG   = $$PWD/logs/console-$$(date +%Y%m%d-%H%M%S).log
+BOCHSRC  = sed -e "s\#%IMG%\#$$PWD/$(1)\#" -e "s\#%LOG%\#$$PWD/$(BUILD)/bochs.log\#" -e "s\#%DISPLAY%\#$(2)\#" \
+               -e "s\#%CONLOG%\#$(3)\#" image/bochs/bochsrc
+DBXCONF  = sed -e "s\#%IMG%\#$$PWD/$(1)\#" -e "s\#%CONLOG%\#$(2)\#" image/dosbox-x/boot.conf
 
 QEMU    := qemu-system-i386 -m 16 -rtc base=localtime \
            -netdev user,id=n0 -device ne2k_isa,netdev=n0,iobase=0x300,irq=10 \
@@ -129,7 +134,8 @@ play-msdos: $(BUILD)/msdos.img $(TESTPROGS)
 
 play-dbx: $(BUILD)/freedos.img $(TESTPROGS)
 	$(MKIMAGE) $(BUILD)/play.img $< image/freedos/fdconfig-root.sys=FDCONFIG.SYS $(CLAUDE_FILES) $(T_FILES)
-	sed "s#%IMG%#$$PWD/$(BUILD)/play.img#" image/dosbox-x/boot.conf > $(BUILD)/play-dbx.conf
+	@mkdir -p logs
+	$(call DBXCONF,$(BUILD)/play.img,$(CONLOG)) > $(BUILD)/play-dbx.conf
 	dosbox-x -conf $(BUILD)/play-dbx.conf
 
 # Bochs: built here with the NE2000 (Homebrew's has no network card).
@@ -140,12 +146,14 @@ bochs: $(BOCHS)
 
 play-bochs: $(BUILD)/msdos.img $(TESTPROGS) $(BOCHS)
 	$(MKIMAGE) $(BUILD)/play-bochs.img $< image/msdos/config-root.sys=CONFIG.SYS $(CLAUDE_FILES) $(T_FILES)
-	$(call BOCHSRC,$(BUILD)/play-bochs.img,sdl2) > $(BUILD)/play-bochs.rc
+	@mkdir -p logs
+	$(call BOCHSRC,$(BUILD)/play-bochs.img,sdl2,$(CONLOG)) > $(BUILD)/play-bochs.rc
 	$(BOCHS) -q -f $(BUILD)/play-bochs.rc
 
 play-bochs-fd: $(BUILD)/freedos.img $(TESTPROGS) $(BOCHS)
 	$(MKIMAGE) $(BUILD)/play-bochs.img $< image/freedos/fdconfig-root.sys=FDCONFIG.SYS $(CLAUDE_FILES) $(T_FILES)
-	$(call BOCHSRC,$(BUILD)/play-bochs.img,sdl2) > $(BUILD)/play-bochs.rc
+	@mkdir -p logs
+	$(call BOCHSRC,$(BUILD)/play-bochs.img,sdl2,$(CONLOG)) > $(BUILD)/play-bochs.rc
 	$(BOCHS) -q -f $(BUILD)/play-bochs.rc
 
 run: $(BUILD)/freedos.img
@@ -276,44 +284,44 @@ DOSBOX_IMG ?= $(BUILD)/freedos.img
 
 dbx: $(DOSBOX_IMG)
 	cp $(DOSBOX_IMG) $(BUILD)/dbx.img
-	sed "s#%IMG%#$$PWD/$(BUILD)/dbx.img#" image/dosbox-x/boot.conf > $(BUILD)/dbx.conf
+	$(call DBXCONF,$(BUILD)/dbx.img,$$PWD/$(BUILD)/dbx-console.log) > $(BUILD)/dbx.conf
 	dosbox-x -conf $(BUILD)/dbx.conf
 
 # Headless through SDL's dummy video driver; FDAPM POWEROFF at the end of the
 # test closes DOSBox-X. The FreeDOS image only: the MS-DOS one waits at a boot menu.
 nettest-dbx: $(BUILD)/freedos.img
 	$(MKIMAGE) $(BUILD)/dbx.img $< tests/net.bat=TEST.BAT
-	sed "s#%IMG%#$$PWD/$(BUILD)/dbx.img#" image/dosbox-x/boot.conf > $(BUILD)/dbx.conf
+	$(call DBXCONF,$(BUILD)/dbx.img,$$PWD/$(BUILD)/dbx-console.log) > $(BUILD)/dbx.conf
 	SDL_VIDEODRIVER=dummy perl -e 'alarm 150; exec @ARGV' dosbox-x -conf $(BUILD)/dbx.conf -silent > $(BUILD)/dbx.log 2>&1 || true
 	mtype -i $(BUILD)/dbx.img@@32256 ::/RESULT.TXT | tr -d '\r'
 
 cmdtest-dbx: $(BUILD)/freedos.img $(TESTPROGS)
 	$(MKIMAGE) $(BUILD)/dbx.img $< tests/cmds.bat=TEST.BAT $(T_FILES)
-	sed "s#%IMG%#$$PWD/$(BUILD)/dbx.img#" image/dosbox-x/boot.conf > $(BUILD)/dbx.conf
+	$(call DBXCONF,$(BUILD)/dbx.img,$$PWD/$(BUILD)/dbx-console.log) > $(BUILD)/dbx.conf
 	SDL_VIDEODRIVER=dummy perl -e 'alarm 150; exec @ARGV' dosbox-x -conf $(BUILD)/dbx.conf -silent > $(BUILD)/dbx.log 2>&1 || true
 	@for f in OURS.TXT REF.TXT OURS3.TXT REF3.TXT OURS4.TXT REF4.TXT; do echo "===== $$f"; mtype -i $(BUILD)/dbx.img@@32256 ::/$$f | tr -d '\r'; done
 
 net5test-dbx: $(BUILD)/freedos.img
 	$(MKIMAGE) $(BUILD)/dbx.img $< image/freedos/fdconfig-root.sys=FDCONFIG.SYS tests/net5.bat=TEST.BAT
-	sed "s#%IMG%#$$PWD/$(BUILD)/dbx.img#" image/dosbox-x/boot.conf > $(BUILD)/dbx.conf
+	$(call DBXCONF,$(BUILD)/dbx.img,$$PWD/$(BUILD)/dbx-console.log) > $(BUILD)/dbx.conf
 	SDL_VIDEODRIVER=dummy perl -e 'alarm 150; exec @ARGV' dosbox-x -conf $(BUILD)/dbx.conf -silent > $(BUILD)/dbx.log 2>&1 || true
 	mtype -i $(BUILD)/dbx.img@@32256 ::/RESULT.TXT | tr -d '\r'
 
 asktest-dbx: $(BUILD)/freedos.img
 	$(MKIMAGE) $(BUILD)/dbx.img $< image/freedos/fdconfig-root.sys=FDCONFIG.SYS tests/ask.bat=TEST.BAT $(CLAUDE_FILES)
-	sed "s#%IMG%#$$PWD/$(BUILD)/dbx.img#" image/dosbox-x/boot.conf > $(BUILD)/dbx.conf
+	$(call DBXCONF,$(BUILD)/dbx.img,$$PWD/$(BUILD)/dbx-console.log) > $(BUILD)/dbx.conf
 	SDL_VIDEODRIVER=dummy perl -e 'alarm 300; exec @ARGV' dosbox-x -conf $(BUILD)/dbx.conf -silent > $(BUILD)/dbx.log 2>&1 || true
 	mtype -i $(BUILD)/dbx.img@@32256 ::/RESULT.TXT | tr -d '\r'
 
 childtest-dbx: $(BUILD)/freedos.img $(TESTPROGS)
 	$(MKIMAGE) $(BUILD)/dbx.img $< tests/child.bat=TEST.BAT $(T_FILES)
-	sed "s#%IMG%#$$PWD/$(BUILD)/dbx.img#" image/dosbox-x/boot.conf > $(BUILD)/dbx.conf
+	$(call DBXCONF,$(BUILD)/dbx.img,$$PWD/$(BUILD)/dbx-console.log) > $(BUILD)/dbx.conf
 	SDL_VIDEODRIVER=dummy perl -e 'alarm 150; exec @ARGV' dosbox-x -conf $(BUILD)/dbx.conf -silent > $(BUILD)/dbx.log 2>&1 || true
 	mtype -i $(BUILD)/dbx.img@@32256 ::/RESULT.TXT | tr -d '\r'
 
 asktest-bochs: $(BUILD)/freedos.img $(BOCHS)
 	$(MKIMAGE) $(BUILD)/bochs-test.img $< image/freedos/fdconfig-root.sys=FDCONFIG.SYS tests/ask.bat=TEST.BAT $(CLAUDE_FILES)
-	$(call BOCHSRC,$(BUILD)/bochs-test.img,nogui) > $(BUILD)/bochs-test.rc
+	$(call BOCHSRC,$(BUILD)/bochs-test.img,nogui,$$PWD/$(BUILD)/bochs-console.log) > $(BUILD)/bochs-test.rc
 	perl -e 'alarm 240; exec @ARGV' $(BOCHS) -q -f $(BUILD)/bochs-test.rc < /dev/null > /dev/null 2>&1 || true
 	mtype -i $(BUILD)/bochs-test.img@@32256 ::/RESULT.TXT | tr -d '\r'
 

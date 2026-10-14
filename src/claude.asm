@@ -23,6 +23,8 @@
 ;   /C cmd     run one command, then exit with its errorlevel
 ;   /K cmd     run one command, then stay
 ;   /E:n       an environment of n bytes (default 1024)
+;   /L         copy everything DOS writes to the console to COM1,
+;              for a transcript (an emulator's serial file)
 ; A leading directory (COMMAND.COM's own location) is ignored.
 ;
 ; Batch files (batch.asm) have %0-%9, %VAR%, IF, GOTO, CALL,
@@ -92,6 +94,7 @@ start:
         mov     dx, on_critical
         mov     ax, 2524h
         int     21h
+        call    mirror_start
 
         ; A permanent shell is its own parent, so that DOS never really
         ; ends it: an Abort or Ctrl-C that ends "this program" comes back
@@ -333,6 +336,7 @@ show_prompt:
 do_exit:
         cmp     byte [permanent], 0
         jne     .stay
+        call    mirror_stop
         mov     al, [errorlevel]
         mov     ah, 4Ch
         int     21h
@@ -775,6 +779,66 @@ run_program:
         ret
 
 ; ------------------------------------------------------------
+; /L: DOS writes console output through INT 29h (CON is a "fast
+; console" device), our own, programs', and the echo of what is
+; typed. The hook sends each character to COM1 too, then goes on to
+; the old handler, so the screen is as before.
+; ------------------------------------------------------------
+mirror_start:
+        cmp     byte [mirror], 0
+        je      .done
+        push    es
+        xor     ax, ax
+        mov     es, ax
+        mov     ax, [es:400h]           ; COM1's port, from the BIOS
+        mov     [com_port], ax
+        test    ax, ax
+        jz      .none                   ; no COM1: nothing to copy to
+        mov     ax, 3529h
+        int     21h
+        mov     [old_int29], bx
+        mov     [old_int29 + 2], es
+        mov     dx, on_int29
+        mov     ax, 2529h
+        int     21h
+        mov     byte [mirror], 2        ; hooked
+.none:  pop     es
+.done:  ret
+
+; Before a non-permanent shell ends: DOS does not restore INT 29h.
+mirror_stop:
+        cmp     byte [mirror], 2
+        jne     .done
+        push    ds
+        lds     dx, [old_int29]
+        mov     ax, 2529h
+        int     21h
+        pop     ds
+        mov     byte [mirror], 1
+.done:  ret
+
+on_int29:
+        push    ax
+        push    cx
+        push    dx
+        mov     dx, [cs:com_port]
+        add     dx, 5                   ; line status
+        mov     ah, al
+        mov     cx, 0FFFFh              ; a port that never empties is not waited for
+.wait:  in      al, dx
+        test    al, 20h                 ; the transmitter can take one
+        jnz     .send
+        loop    .wait
+        jmp     .out
+.send:  sub     dx, 5
+        mov     al, ah
+        out     dx, al
+.out:   pop     dx
+        pop     cx
+        pop     ax
+        jmp     far [cs:old_int29]
+
+; ------------------------------------------------------------
 ; Ctrl-C, critical errors, and the way back to the prompt
 ; ------------------------------------------------------------
 
@@ -990,6 +1054,8 @@ parse_switches:
         je      .d
         cmp     al, 'E'
         je      .e
+        cmp     al, 'L'
+        je      .l
         cmp     al, 'P'
         jne     .skip_word
         mov     byte [permanent], 1
@@ -1012,6 +1078,8 @@ parse_switches:
         mov     byte [di], 0
         jmp     .next
 .d:     mov     byte [no_startup], 1
+        jmp     .skip_word
+.l:     mov     byte [mirror], 1
         jmp     .skip_word
 .e:     cmp     byte [si], ':'
         jne     .skip_word
@@ -1205,6 +1273,9 @@ delims_end:
 permanent       resb 1
 want_startup    resb 1
 no_startup      resb 1
+mirror          resb 1          ; /L: 1 asked for, 2 INT 29h hooked
+com_port        resw 1
+old_int29       resd 1
 by_dos          resb 1
 mode            resb 1          ; 0, 'C' or 'K'
 from_keyboard   resb 1          ; the line running was typed at the prompt

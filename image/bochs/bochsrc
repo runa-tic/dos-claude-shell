@@ -8,6 +8,7 @@ ata0: enabled=1
 ata0-master: type=disk, path="%IMG%", mode=flat
 ne2k: type=isa, ioaddr=0x300, irq=10, mac=52:54:00:12:34:57, ethmod=slirp
 clock: sync=realtime, time0=local
+com1: enabled=1, mode=file, dev=%CONLOG%
 log: %LOG%
 panic: action=fatal
 display_library: %DISPLAY%
