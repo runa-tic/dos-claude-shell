@@ -82,6 +82,9 @@ There is no TLS, so plain HTTP only. The answer is printed wrapped to 80 columns
 word at a time on the screen (about 25 a second; `pace=` in `CLAUDE.CFG` sets the
 milliseconds a word, `pace=0` none; a key pressed prints the rest at once), and
 the conversation is kept until `NEW`, the oldest turns going when it outgrows its 24 KB.
+It is saved in `CLAUDE.HIS` beside the shell after every turn, so it outlives a reboot
+or a crash; `NEW` deletes it. A turn that stops part way (the step limit, a lost
+connection) keeps what Claude did, so `continue` goes on from there.
 In a batch file a line that is not a command is still "Bad command or file name".
 
 **Claude acts**: it can run a command line here and read what it printed (`run`), or

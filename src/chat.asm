@@ -34,9 +34,10 @@ cmd_ask:
         je      required_missing
         jmp     claude_turn
 
-; NEW: forget the conversation.
+; NEW: forget the conversation, the saved one too.
 cmd_new:
         mov     word [hist_len], 0
+        call    hist_save
         mov     si, msg_forgotten
         jmp     print_z
 
@@ -95,6 +96,7 @@ claude_turn:
         jc      .no_memory
         mov     [hist_seg], ax
         mov     word [hist_len], 0
+        call    hist_load
 .history:
         call    http_buffers
         call    first_fit
@@ -165,7 +167,8 @@ claude_turn:
         jmp     .free
 .finished:
         call    net_close
-.free:  call    http_free
+.free:  call    hist_save
+        call    http_free
 .forget_key:
         mov     byte [in_turn], 0
         call    first_fit
@@ -183,6 +186,71 @@ claude_turn:
         mov     si, msg_net_memory
         call    print_err
         jmp     .forget_key
+
+; hist_save: the conversation into CLAUDE.HIS beside the shell, so that
+; it outlives a reboot or a crash; with none, no file. A failure is let
+; go: the conversation is still here until then.
+hist_save:
+        mov     si, name_his
+        call    cfg_path
+        mov     dx, pathbuf
+        cmp     word [hist_len], 0
+        je      .delete
+        xor     cx, cx
+        mov     ah, 3Ch
+        int     21h
+        jc      .done
+        mov     bx, ax
+        mov     cx, [hist_len]
+        push    ds
+        mov     ds, [hist_seg]
+        xor     dx, dx
+        mov     ah, 40h
+        int     21h
+        pop     ds
+        mov     ah, 3Eh
+        int     21h
+.done:  ret
+.delete:
+        mov     ah, 41h
+        int     21h
+        ret
+
+; hist_load: the saved conversation, if there is one, into the newly
+; made hist_seg. Anything that is not one is ignored.
+hist_load:
+        mov     si, name_his
+        call    cfg_path
+        mov     dx, pathbuf
+        mov     ax, 3D00h
+        int     21h
+        jc      .done
+        mov     bx, ax
+        mov     cx, HIST_MAX
+        push    ds
+        mov     ds, [hist_seg]
+        xor     dx, dx
+        mov     ah, 3Fh
+        int     21h
+        pop     ds
+        jc      .close
+        cmp     ax, HIST_MAX            ; filled it: not one of ours
+        jae     .close
+        test    ax, ax
+        jz      .close
+        push    es
+        mov     es, [hist_seg]
+        cmp     byte [es:0], '{'
+        pop     es
+        jne     .close
+        mov     [hist_len], ax
+        push    bx
+        mov     si, msg_restored
+        call    print_err
+        pop     bx
+.close: mov     ah, 3Eh
+        int     21h
+.done:  ret
 
 ; keep_turn: a turn that stopped part way. What Claude did is kept, up
 ; to the results of its last actions, with a word from the shell (SI)
@@ -723,6 +791,7 @@ key_url         db 'url=', 0
 key_model       db 'model=', 0
 key_pace        db 'pace=', 0
 name_key        db 'CLAUDE.KEY', 0
+name_his        db 'CLAUDE.HIS', 0
 comma_str       db ',', 0
 close_brace     db '}', 0
 js_user_start   db '{"role":"user","content":"', 0
@@ -759,6 +828,7 @@ js_stopped_end  db ' Everything above did happen.]"}', 0
 js_stop_steps   db 'it allows ', MAX_STEPS + '0', ' steps in one turn. The user may say continue.', 0
 js_stop_failed  db 'the connection failed or the answer could not be read.', 0
 msg_forgotten   db 'Conversation forgotten', 13, 10, 0
+msg_restored    db '(the conversation from before goes on; NEW forgets it)', 13, 10, 0
 
 ; Already JSON string text: quotes and backslashes are escaped here.
 system_prompt:
