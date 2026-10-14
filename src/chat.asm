@@ -15,6 +15,7 @@
 BODY_AT         equ 1024
 HIST_PARAS      equ 0600h       ; 24 KB of conversation
 HIST_MAX        equ HIST_PARAS * 16
+PACE_MS         equ 5           ; an answer on the screen: about 200 characters a second
 TEXT_AT         equ 8000h       ; where decoded text goes in req_seg
 TEXT_MAX        equ 7FF0h
 MAX_STEPS       equ 8           ; requests in one turn (tools: phase 7)
@@ -50,6 +51,18 @@ claude_ready:
         mov     di, cfg_model
         mov     cx, NAME_MAX
         call    cfg_get
+        jc      .no
+        mov     word [pace_ms], PACE_MS ; pace=n: milliseconds a character
+        mov     si, key_pace
+        mov     di, pace_buf
+        mov     cx, 8
+        call    cfg_get
+        jc      .ready
+        mov     si, pace_buf
+        call    parse_num
+        jc      .ready
+        mov     [pace_ms], ax
+.ready: clc
 .no:    ret
 
 ; claude_turn: the line at SI to Claude, and the answer printed.
@@ -569,9 +582,11 @@ err_newline:
         jmp     print_err
 
 ; print_wrapped: the text at FS:SI, words wrapped at 80 columns, line
-; feeds as new lines.
+; feeds as new lines. On the screen it comes out a character at a
+; time, as if Claude were typing it (pace).
 print_wrapped:
         mov     byte [wrap_col], 0
+        call    pace_start
 .next:  mov     al, [fs:si]
         test    al, al
         jz      .end
@@ -587,6 +602,7 @@ print_wrapped:
         jae     .next                   ; at the edge a space is the line break
         mov     dl, ' '
         call    putc
+        call    pace
         inc     byte [wrap_col]
         jmp     .next
 .word:  mov     bx, si                  ; how long is it?
@@ -607,6 +623,7 @@ print_wrapped:
         call    .newline
 .fits:  mov     dl, [fs:si]
         call    putc
+        call    pace
         inc     si
         inc     byte [wrap_col]
         cmp     byte [wrap_col], 80     ; a word longer than a line breaks anywhere
@@ -622,9 +639,51 @@ print_wrapped:
         mov     byte [wrap_col], 0
         jmp     newline
 
+; pace_start: pace only when the answer goes to the screen (standard
+; output is the console device) and CLAUDE.CFG does not say pace=0.
+pace_start:
+        mov     byte [pace_on], 0
+        cmp     word [pace_ms], 0
+        je      .done
+        mov     ax, 4400h
+        mov     bx, 1
+        int     21h
+        jc      .done
+        and     dl, 82h                 ; a device, and the console's output
+        cmp     dl, 82h
+        jne     .done
+        mov     byte [pace_on], 1
+.done:  ret
+
+; pace: wait pace_ms after a character. A key pressed (left there for
+; the prompt) or a BIOS that cannot wait ends it: the rest at once.
+pace:   cmp     byte [pace_on], 0
+        je      .done
+        push    ax
+        push    cx
+        push    dx
+        mov     ah, 1
+        int     16h
+        jnz     .stop                   ; a key is waiting
+        movzx   eax, word [pace_ms]
+        imul    eax, eax, 1000          ; microseconds, in CX:DX
+        mov     dx, ax
+        shr     eax, 16
+        mov     cx, ax
+        mov     ah, 86h
+        int     15h
+        jnc     .waited
+.stop:  mov     byte [pace_on], 0
+.waited:
+        pop     dx
+        pop     cx
+        pop     ax
+.done:  ret
+
         section .data
 key_url         db 'url=', 0
 key_model       db 'model=', 0
+key_pace        db 'pace=', 0
 name_key        db 'CLAUDE.KEY', 0
 comma_str       db ',', 0
 close_brace     db '}', 0
@@ -691,6 +750,9 @@ turn_steps      resb 1
 turn_more       resb 1
 results_started resb 1
 wrap_col        resb 1
+pace_on         resb 1
+pace_ms         resw 1
+pace_buf        resb 8
 KEY_MAX         equ 160
 HDRBUF_SIZE     equ 768
 cfg_url         resb LINE_MAX + 2

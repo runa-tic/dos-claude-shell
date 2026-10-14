@@ -78,7 +78,9 @@ with the key in `CLAUDE.KEY` beside it:
 url=http://10.0.2.2:8765/v1/messages
 model=claude-haiku-5-5
 ```
-There is no TLS, so plain HTTP only. The answer is printed wrapped to 80 columns, and
+There is no TLS, so plain HTTP only. The answer is printed wrapped to 80 columns, a
+character at a time on the screen (about 200 a second; `pace=` in `CLAUDE.CFG` sets the
+milliseconds a character, `pace=0` none; a key pressed prints the rest at once), and
 the conversation is kept until `NEW`, the oldest turns going when it outgrows its 24 KB.
 In a batch file a line that is not a command is still "Bad command or file name".
 
