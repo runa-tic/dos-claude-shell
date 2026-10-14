@@ -111,8 +111,8 @@ claude_turn:
         call    make_room
         jc      .too_long
         mov     ax, [hist_len]
-        mov     [hist_mark], ax         ; to go back to if the turn fails
-        mov     [hist_keep], ax
+        mov     [hist_keep], ax         ; this turn starts here (make_room moves it
+        mov     word [turn_good], 0     ; with the text); none of it is kept yet
         call    hist_comma
         mov     si, js_user_start
         call    hist_add
@@ -143,15 +143,24 @@ claude_turn:
         jc      .failed_net
         cmp     byte [turn_more], 0     ; it asked for actions: their results go back
         je      .finished
+        mov     ax, [hist_len]          ; actions done and their results in: if the
+        sub     ax, [hist_keep]         ; turn stops later, it is kept up to here
+        mov     [turn_good], ax
         inc     byte [turn_steps]
         cmp     byte [turn_steps], MAX_STEPS
         jb      .step
         mov     si, msg_too_many
         call    print_err
+        mov     si, js_stop_steps
+        jmp     .stopped
 .failed_net:
+        mov     si, js_stop_failed
+.stopped:
         call    net_close
+        call    keep_turn
+        jmp     .free
 .failed:
-        mov     ax, [hist_mark]
+        mov     ax, [hist_keep]         ; nothing happened: the question goes too
         mov     [hist_len], ax
         jmp     .free
 .finished:
@@ -174,6 +183,36 @@ claude_turn:
         mov     si, msg_net_memory
         call    print_err
         jmp     .forget_key
+
+; keep_turn: a turn that stopped part way. What Claude did is kept, up
+; to the results of its last actions, with a word from the shell (SI)
+; saying why it stopped, so that "continue" can go on from there. If
+; no action was done yet, the turn goes, the question with it.
+keep_turn:
+        mov     ax, [hist_keep]
+        cmp     word [turn_good], 0
+        je      .drop
+        add     ax, [turn_good]
+        mov     [hist_len], ax
+        push    si
+        call    strlen
+        add     ax, 80
+        mov     [hist_need], ax
+        call    make_room
+        pop     si
+        jc      .drop_now
+        push    si
+        call    hist_comma
+        mov     si, js_stopped
+        call    hist_add
+        pop     si
+        call    hist_add
+        mov     si, js_stopped_end
+        jmp     hist_add
+.drop_now:
+        mov     ax, [hist_keep]
+.drop:  mov     [hist_len], ax
+        ret
 
 ; last_fit / first_fit: where DOS takes memory from. Blocks that come and
 ; go are taken from the top, so the memory programs get stays in one piece.
@@ -714,7 +753,11 @@ msg_unthink     db 13, '                  ', 13, 0
 msg_api_said    db 'Claude: ', 0
 msg_garbled     db 'Claude: the answer made no sense', 13, 10, 0
 msg_too_long    db 'The conversation is too long: NEW starts a new one', 13, 10, 0
-msg_too_many    db 'Claude: too many steps in one turn', 13, 10, 0
+msg_too_many    db 'Claude: too many steps in one turn; say continue to go on', 13, 10, 0
+js_stopped      db '{"role":"assistant","content":"[The shell stopped this turn here: ', 0
+js_stopped_end  db ' Everything above did happen.]"}', 0
+js_stop_steps   db 'it allows ', MAX_STEPS + '0', ' steps in one turn. The user may say continue.', 0
+js_stop_failed  db 'the connection failed or the answer could not be read.', 0
 msg_forgotten   db 'Conversation forgotten', 13, 10, 0
 
 ; Already JSON string text: quotes and backslashes are escaped here.
@@ -735,7 +778,7 @@ hist_seg        resw 1
 hist_len        resw 1
 hist_need       resw 1
 hist_keep       resw 1
-hist_mark       resw 1
+turn_good       resw 1          ; how much of this turn to keep if it stops
 turn_text       resw 1
 body_len        resw 1
 req_start       resw 1
