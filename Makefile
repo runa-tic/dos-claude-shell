@@ -67,8 +67,12 @@ $(BUILD)/hellox.exe: tests/hellox.asm | $(BUILD)
 $(BUILD)/upper.com: tests/upper.asm | $(BUILD)
 	nasm -f bin -o $@ $<
 
-TESTPROGS = $(BUILD)/hello.com $(BUILD)/hellox.exe $(BUILD)/upper.com
+$(BUILD)/hang.com: tests/hang.asm | $(BUILD)
+	nasm -f bin -o $@ $<
+
+TESTPROGS = $(BUILD)/hello.com $(BUILD)/hellox.exe $(BUILD)/upper.com $(BUILD)/hang.com
 T_FILES = $(BUILD)/hello.com=T/HELLO.COM $(BUILD)/hellox.exe=T/HELLOX.EXE $(BUILD)/upper.com=T/UPPER.COM \
+          $(BUILD)/hang.com=T/HANG.COM \
           $(BUILD)/hello.com=T/PICK.COM $(BUILD)/hellox.exe=T/PICK.EXE \
           $(BUILD)/hellox.exe=T/PICK2.EXE tests/pick2.bat=T/PICK2.BAT \
           tests/sub.bat=T/SUB.BAT tests/slow.bat=T/SLOW.BAT \

@@ -163,8 +163,19 @@ main_loop:
         cmp     byte [exit_after], 0
         jne     .exit
         call    read_command
-        mov     si, linebuf
         mov     byte [from_keyboard], 1
+        ; a typed line that does not start with a command is for Claude,
+        ; whole: | < > in a question are not a pipe or redirection
+        mov     si, linebuf
+        call    line_is_command
+        jnc     .typed
+        call    claude_ready
+        jc      .typed                  ; not set up: "Bad command or file name"
+        mov     si, linebuf
+        call    claude_turn
+        mov     byte [from_keyboard], 0
+        jmp     main_loop
+.typed: mov     si, linebuf
         jmp     .run
 .batch: call    batch_next
         jc      main_loop
@@ -352,20 +363,8 @@ execute_line:
         call    skip_blanks
         cmp     byte [si], 0
         je      .ret
-        mov     [cmd_start], si
-        mov     di, cmdname
-        mov     cx, NAME_MAX
-.tok:   lodsb
-        call    is_delim
-        je      .tok_end
-        call    upcase
-        stosb
-        loop    .tok
-        jmp     bad_command             ; a name longer than any path
-.tok_end:
-        dec     si
-        mov     [tok_end], si
-        mov     byte [di], 0
+        call    read_name
+        jc      bad_command             ; a name longer than any path
 
         ; X: changes the current drive
         mov     ax, di
@@ -376,32 +375,9 @@ execute_line:
         je      change_drive
 
 .internal:
-        mov     bx, internals
-.next:  mov     si, [bx]
-        test    si, si
-        jz      .external
-        mov     di, cmdname
-.cmp:   lodsb
-        test    al, al
-        jz      .name_end
-        cmp     al, [di]
-        jne     .skip
-        inc     di
-        jmp     .cmp
-.name_end:
-        ; CD.. and ECHO. are CD and ECHO: a name may run into a dot or a backslash
-        mov     al, [di]
-        test    al, al
-        jz      .found
-        cmp     al, '.'
-        je      .found
-        cmp     al, '\'
-        je      .found
-        cmp     al, ':'                 ; GOTO:END
-        je      .found
-.skip:  add     bx, 4
-        jmp     .next
-.found: sub     di, cmdname             ; the arguments start right after the name
+        call    find_internal
+        jc      .external
+        sub     di, cmdname             ; the arguments start right after the name
         add     di, [cmd_start]
         mov     si, di
         jmp     [bx + 2]
@@ -427,6 +403,87 @@ execute_line:
 bad_command:
         mov     si, msg_bad_command
         jmp     print_err
+
+; read_name: the command name at SI into cmdname, in upper case, DI on
+; its end; cmd_start and tok_end set. CF if it is longer than any path.
+read_name:
+        mov     [cmd_start], si
+        mov     di, cmdname
+        mov     cx, NAME_MAX
+.tok:   lodsb
+        call    is_delim
+        je      .tok_end
+        call    upcase
+        stosb
+        loop    .tok
+        stc
+        ret
+.tok_end:
+        dec     si
+        mov     [tok_end], si
+        mov     byte [di], 0
+        clc
+        ret
+
+; find_internal: BX on cmdname's entry in internals, DI past the name
+; in cmdname; CF if it is none of them.
+find_internal:
+        mov     bx, internals
+.next:  mov     si, [bx]
+        test    si, si
+        jz      .none
+        mov     di, cmdname
+.cmp:   lodsb
+        test    al, al
+        jz      .name_end
+        cmp     al, [di]
+        jne     .skip
+        inc     di
+        jmp     .cmp
+.name_end:
+        ; CD.. and ECHO. are CD and ECHO: a name may run into a dot or a backslash
+        mov     al, [di]
+        test    al, al
+        jz      .found
+        cmp     al, '.'
+        je      .found
+        cmp     al, '\'
+        je      .found
+        cmp     al, ':'                 ; GOTO:END
+        je      .found
+.skip:  add     bx, 4
+        jmp     .next
+.found: clc
+        ret
+.none:  stc
+        ret
+
+; line_is_command: CF clear if the line at SI starts with something to
+; run: an internal command, a drive, a program or batch file that is
+; there; or with nothing, or with a redirection, which run_line can
+; complain about.
+line_is_command:
+        call    skip_blanks
+        mov     al, [si]
+        call    is_delim
+        je      .yes
+        call    read_name
+        jc      .yes
+        mov     ax, di
+        sub     ax, cmdname
+        cmp     ax, 2
+        jne     .internal
+        cmp     byte [cmdname + 1], ':'
+        je      .yes
+.internal:
+        call    find_internal
+        jnc     .yes
+        call    find_program
+        jnc     .yes
+        stc
+        ret
+.yes:   clc
+        ret
 
 change_drive:
         mov     dl, [cmdname]
@@ -869,6 +926,7 @@ restart:
         call    net_close
         call    http_free
         call    first_fit
+        call    break_disarm
         call    capture_stop            ; one of Claude's actions cut short
         mov     byte [in_turn], 0
         mov     byte [no_batch], 0

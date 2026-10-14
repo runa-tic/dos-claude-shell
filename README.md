@@ -44,7 +44,7 @@ Each starts from a fresh copy of the image (`build/play.img`), so do anything to
 The shell is started with `/L` there, and the emulator writes COM1 to
 `logs/console-<date>-<time>.log`: a transcript of the session. Type
 DOS commands as usual; type a question, or anything that is not a command, and it goes to
-Claude. `ASK question` asks even when the line starts with a command's name, `NEW`
+Claude, the whole line, `|` `<` `>` and all. `ASK question` asks even when the line starts with a command's name, `NEW`
 forgets the conversation, `NET` shows the network, `PING` and `FETCH` use it.
 
 ## What it does
@@ -91,7 +91,9 @@ read-only commands run without asking (`DIR`, `TYPE`, `VER`, `VOL`, `TRUENAME`, 
 piped). Anything else is shown first with "Allow it? (Y/N)", answered at the keyboard
 itself after the keyboard buffer is emptied, so neither type-ahead nor redirected input
 can answer for you. While Claude acts, batch files, the network commands, `ASK` and
-`EXIT` are refused.
+`EXIT` are refused. A command of Claude's that hangs (DEBUG with its piped commands run
+out, say) is ended by Ctrl-C even when the program takes Ctrl-C for itself: its next DOS
+call becomes its exit, and Claude is told.
 
 ## As the system shell
 In `FDCONFIG.SYS` (FreeDOS) or `CONFIG.SYS` (MS-DOS):

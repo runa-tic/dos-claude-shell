@@ -224,8 +224,10 @@ tool_run:
         call    append_z
         mov     byte [pipe_prev], 0
         mov     byte [no_batch], 1
+        call    break_arm
         mov     si, tool_cmd
         call    run_line
+        call    break_disarm
         mov     byte [no_batch], 0
         mov     si, outer_prev
         mov     di, pipe_prev
@@ -243,7 +245,13 @@ tool_run:
         mov     si, js_content_start
         call    res_add
         call    res_esc_capture
-        mov     dx, cap_name
+        cmp     byte [killed], 0
+        je      .whole
+        mov     si, msg_ended
+        call    print_err
+        mov     si, msg_killed
+        call    res_esc_z
+.whole: mov     dx, cap_name
         mov     ah, 41h
         int     21h
         ret
@@ -255,6 +263,108 @@ tool_run:
         call    res_add
         pop     si
         jmp     res_esc_z
+
+; ------------------------------------------------------------
+; A way out of a command that hangs. Its output goes to a file, so the
+; user cannot see that it waits, and a program that takes Ctrl-C for
+; itself (DEBUG does) is not ended by it. While one of Claude's
+; commands runs, Ctrl-C (or Ctrl-Break) is noticed at the keyboard
+; (INT 09h), and the program's next DOS call becomes "end with
+; errorlevel 255" (INT 21h): as if it had ended itself there.
+; ------------------------------------------------------------
+break_arm:
+        mov     byte [kill_child], 0
+        mov     byte [killed], 0
+        push    es
+        mov     ax, 3509h
+        int     21h
+        mov     [old_int09], bx
+        mov     [old_int09 + 2], es
+        mov     ax, 3521h
+        int     21h
+        mov     [old_int21], bx
+        mov     [old_int21 + 2], es
+        pop     es
+        mov     dx, on_int09
+        mov     ax, 2509h
+        int     21h
+        mov     dx, on_int21
+        mov     ax, 2521h
+        int     21h
+        mov     byte [break_armed], 1
+        ret
+
+; break_disarm: the vectors back, if they are still ours (a program
+; that stayed resident may have hooked them since; then ours stay,
+; passing everything on).
+break_disarm:
+        cmp     byte [break_armed], 0
+        je      .done
+        mov     byte [break_armed], 0
+        mov     byte [kill_child], 0
+        push    ds
+        push    es
+        xor     ax, ax
+        mov     es, ax
+        mov     ax, cs
+        cmp     [es:21h * 4 + 2], ax
+        jne     .int09
+        cmp     word [es:21h * 4], on_int21
+        jne     .int09
+        lds     dx, [cs:old_int21]
+        mov     ax, 2521h
+        int     21h
+        push    cs
+        pop     ds
+.int09: mov     ax, cs
+        cmp     [es:09h * 4 + 2], ax
+        jne     .back
+        cmp     word [es:09h * 4], on_int09
+        jne     .back
+        lds     dx, [cs:old_int09]
+        mov     ax, 2509h
+        int     21h
+.back:  pop     es
+        pop     ds
+.done:  ret
+
+on_int09:
+        cmp     byte [cs:break_armed], 0
+        je      .chain
+        push    ax
+        in      al, 60h
+        cmp     al, 2Eh                 ; C pressed
+        je      .ctrl
+        cmp     al, 46h                 ; Break (Ctrl-Scroll Lock)
+        jne     .out
+.ctrl:  push    ds
+        mov     ax, 40h
+        mov     ds, ax
+        test    byte [17h], 04h         ; with Ctrl down
+        pop     ds
+        jz      .out
+        mov     byte [cs:kill_child], 1
+.out:   pop     ax
+.chain: jmp     far [cs:old_int09]
+
+on_int21:
+        cmp     byte [cs:kill_child], 0
+        jne     .kill
+.pass:  jmp     far [cs:old_int21]
+.kill:  mov     byte [cs:kill_child], 0
+        push    ax
+        push    bx
+        mov     ah, 51h                 ; whose call is it?
+        pushf
+        call    far [cs:old_int21]
+        mov     ax, cs
+        cmp     bx, ax
+        pop     bx
+        pop     ax
+        je      .pass                   ; the shell's own: nothing to end
+        mov     byte [cs:killed], 1
+        mov     ax, 4CFFh
+        jmp     .pass
 
 ; cmd_is_safe: CF clear if the command at tool_cmd only looks: DIR, TYPE,
 ; VER, VOL, TRUENAME, CD, MEM, ECHO, REM, and SET and PATH with nothing
@@ -661,6 +771,9 @@ msg_no_action   db 'There is no such action.', 0
 msg_tool_input  db 'The action is missing what it needs.', 0
 msg_no_temp     db 'No temporary file could be made for the output.', 0
 msg_no_output   db '(it printed nothing)', 0
+msg_ended       db '(ended with Ctrl-C)', 13, 10, 0
+msg_killed      db ' [The user ended this program with Ctrl-C: it was still running, probably '
+                db 'waiting for input that never came.]', 0
 msg_cannot_write db 'The file could not be created.', 0
 msg_written     db 'Written: ', 0
 msg_busy        db 'Not while Claude is acting', 13, 10, 0
@@ -673,7 +786,9 @@ tools_text:
         db 'SET, PATH, VER, VOL, TRUENAME) and runs .COM and .EXE programs found along PATH; '
         db '< > >> and | work. Batch files, NET, PING, FETCH and ASK cannot run here. Never run a '
         db 'program that waits for keys or takes over the screen (EDIT, DATE or TIME without a '
-        db 'value). The user sees the command and its output. Anything that may change something '
+        db 'value). A program reading its commands from < or | (DEBUG, EDLIN) waits forever '
+        db 'when they run out, so end every such script with its quit command (Q). If a '
+        db 'command does hang, the user can end it with Ctrl-C, and you are told. The user sees the command and its output. Anything that may change something '
         db 'is shown to the user first, who may refuse it.","input_schema":{"type":"object",'
         db '"properties":{"command":{"type":"string"}},"required":["command"]}},'
         db '{"name":"write_file","description":"Create a text file, or replace one, with the '
@@ -697,6 +812,12 @@ write_bytes     resw 1
 outer_more      resb 1
 cap_active      resb 1
 cap_any         resb 1
+break_armed     resb 1
+kill_child      resb 1          ; Ctrl-C seen: end the program at its next DOS call
+killed          resb 1          ; and it was
+                alignb 4
+old_int09       resd 1
+old_int21       resd 1
 no_batch        resb 1
 in_turn         resb 1
 allow_key       resb 2
