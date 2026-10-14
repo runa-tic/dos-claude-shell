@@ -1,0 +1,13 @@
+# Bochs profile: boot a real DOS from the disk image named by IMG, with an
+# ISA NE2000 at 0x300, IRQ 10, on the slirp network (the host is 10.0.2.2, as
+# under QEMU and DOSBox-X). Needs a Bochs built with --enable-ne2000, which
+# Homebrew's is not: `make bochs` builds one into build/bochs.
+megs: 16
+boot: disk
+ata0: enabled=1
+ata0-master: type=disk, path="%IMG%", mode=flat
+ne2k: type=isa, ioaddr=0x300, irq=10, mac=52:54:00:12:34:57, ethmod=slirp
+clock: sync=realtime, time0=local
+log: %LOG%
+panic: action=fatal
+display_library: %DISPLAY%

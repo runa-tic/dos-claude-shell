@@ -26,6 +26,8 @@ FD_BASE := $(BUILD)/fd14lite.img
 SHELL_COM := $(BUILD)/claude.com
 MKIMAGE := python3 tools/mkimage.py
 BOOT    := python3 tools/boot.py
+BOCHS   := $(BUILD)/bochs/bin/bochs
+BOCHSRC  = sed -e "s\#%IMG%\#$$PWD/$(1)\#" -e "s\#%LOG%\#$$PWD/$(BUILD)/bochs.log\#" -e "s\#%DISPLAY%\#$(2)\#" image/bochs/bochsrc
 
 QEMU    := qemu-system-i386 -m 16 -rtc base=localtime \
            -netdev user,id=n0 -device ne2k_isa,netdev=n0,iobase=0x300,irq=10 \
@@ -38,7 +40,7 @@ NETFILES = $(PKG)/DRIVERS/CRYNWR/NE2000.COM=NET/NE2000.COM \
            $(PKG)/NET/mTCP/htget.exe=NET/HTGET.EXE \
            $(PKG)/NET/mTCP/nc.exe=NET/NC.EXE
 
-.PHONY: all fetch freedos play play-msdos play-dbx run nettest shelltest childtest cmdtest msdos run-msdos nettest-msdos \
+.PHONY: all fetch freedos play play-msdos play-dbx play-bochs play-bochs-fd bochs asktest-bochs run nettest shelltest childtest cmdtest msdos run-msdos nettest-msdos \
         shelltest-msdos childtest-msdos cmdtest-msdos roottest rootnet roottest-msdos rootnet-msdos net5test net5test-msdos asktest asktest-msdos asktype tooltest tooltest-msdos dbx nettest-dbx childtest-dbx cmdtest-dbx net5test-dbx asktest-dbx clean
 
 all: $(SHELL_COM)
@@ -129,6 +131,22 @@ play-dbx: $(BUILD)/freedos.img $(TESTPROGS)
 	$(MKIMAGE) $(BUILD)/play.img $< image/freedos/fdconfig-root.sys=FDCONFIG.SYS $(CLAUDE_FILES) $(T_FILES)
 	sed "s#%IMG%#$$PWD/$(BUILD)/play.img#" image/dosbox-x/boot.conf > $(BUILD)/play-dbx.conf
 	dosbox-x -conf $(BUILD)/play-dbx.conf
+
+# Bochs: built here with the NE2000 (Homebrew's has no network card).
+$(BOCHS):
+	sh tools/build-bochs.sh
+
+bochs: $(BOCHS)
+
+play-bochs: $(BUILD)/msdos.img $(TESTPROGS) $(BOCHS)
+	$(MKIMAGE) $(BUILD)/play-bochs.img $< image/msdos/config-root.sys=CONFIG.SYS $(CLAUDE_FILES) $(T_FILES)
+	$(call BOCHSRC,$(BUILD)/play-bochs.img,sdl2) > $(BUILD)/play-bochs.rc
+	$(BOCHS) -q -f $(BUILD)/play-bochs.rc
+
+play-bochs-fd: $(BUILD)/freedos.img $(TESTPROGS) $(BOCHS)
+	$(MKIMAGE) $(BUILD)/play-bochs.img $< image/freedos/fdconfig-root.sys=FDCONFIG.SYS $(CLAUDE_FILES) $(T_FILES)
+	$(call BOCHSRC,$(BUILD)/play-bochs.img,sdl2) > $(BUILD)/play-bochs.rc
+	$(BOCHS) -q -f $(BUILD)/play-bochs.rc
 
 run: $(BUILD)/freedos.img
 	@mkdir -p logs
@@ -292,6 +310,12 @@ childtest-dbx: $(BUILD)/freedos.img $(TESTPROGS)
 	sed "s#%IMG%#$$PWD/$(BUILD)/dbx.img#" image/dosbox-x/boot.conf > $(BUILD)/dbx.conf
 	SDL_VIDEODRIVER=dummy perl -e 'alarm 150; exec @ARGV' dosbox-x -conf $(BUILD)/dbx.conf -silent > $(BUILD)/dbx.log 2>&1 || true
 	mtype -i $(BUILD)/dbx.img@@32256 ::/RESULT.TXT | tr -d '\r'
+
+asktest-bochs: $(BUILD)/freedos.img $(BOCHS)
+	$(MKIMAGE) $(BUILD)/bochs-test.img $< image/freedos/fdconfig-root.sys=FDCONFIG.SYS tests/ask.bat=TEST.BAT $(CLAUDE_FILES)
+	$(call BOCHSRC,$(BUILD)/bochs-test.img,nogui) > $(BUILD)/bochs-test.rc
+	perl -e 'alarm 240; exec @ARGV' $(BOCHS) -q -f $(BUILD)/bochs-test.rc < /dev/null > /dev/null 2>&1 || true
+	mtype -i $(BUILD)/bochs-test.img@@32256 ::/RESULT.TXT | tr -d '\r'
 
 clean:
 	rm -rf $(BUILD)

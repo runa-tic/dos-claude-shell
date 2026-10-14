@@ -19,7 +19,7 @@ Created C:\NOTE.TXT with the text "hello from claude".
 
 **Status: all seven planned phases are done.** It boots as the only shell on FreeDOS
 and MS-DOS 6.22, runs the systems' own startup files, and is tested under QEMU on both
-and under DOSBox-X on FreeDOS. It is 22 KB, and programs get about 557K with it as the
+and under DOSBox-X and Bochs on FreeDOS. It is 22 KB, and programs get about 557K with it as the
 shell (612K under `COMMAND.COM`).
 
 ## Try it
@@ -36,7 +36,10 @@ make fetch          # once: FreeDOS 1.4 Lite (17 MB), the NE2000 packet driver, 
 make play           # FreeDOS in a QEMU window, CLAUDE.COM the only shell, Claude set up
 make play-msdos     # the same on your own MS-DOS 6.22 image (see below)
 make play-dbx       # the same in DOSBox-X
+make play-bochs     # MS-DOS 6.22 in Bochs (play-bochs-fd for FreeDOS)
 ```
+Homebrew's Bochs has no network card, so the first `make play-bochs` builds Bochs 3.0
+with the NE2000 into `build/bochs` (`tools/build-bochs.sh`, a few minutes).
 Each starts from a fresh copy of the image (`build/play.img`), so do anything to it. Type
 DOS commands as usual; type a question, or anything that is not a command, and it goes to
 Claude. `ASK question` asks even when the line starts with a command's name, `NEW`
@@ -108,9 +111,10 @@ src/chat.asm            Claude: the request, the conversation, the answer; ASK, 
 src/json.asm            enough JSON to read the answer
 src/tools.asm           Claude's actions, run and write_file, and the Y/N gate
 src/util.asm            text, numbers, dates and file names
-image/                  config and startup files for each DOS, CLAUDE.CFG, a DOSBox-X profile
+image/                  config and startup files for each DOS, CLAUDE.CFG, DOSBox-X and Bochs profiles
 tests/                  test batch files, their input, and three tiny test programs
 tools/fetch.sh          downloads FreeDOS 1.4 Lite, the NE2000 driver and mTCP, hash-checked
+tools/build-bochs.sh    builds Bochs 3.0 with the NE2000 and slirp into build/bochs
 tools/mkimage.py        a copy of a base disk image with files put onto it (mtools)
 tools/boot.py           boots an image headless in QEMU, types at it, reports
 tools/keys.py screen.py pcap.py   keystroke injection, screen and packet decoding
@@ -136,7 +140,7 @@ make asktype        # questions typed at the prompt
 make tooltest       # Claude looks (DIR), writes a file (Y), is refused DEL (N)
 ```
 Most have `-msdos` versions, and `childtest-dbx`, `cmdtest-dbx`, `net5test-dbx`,
-`asktest-dbx` run in DOSBox-X. The reference for `cmdtest` is the system's own shell:
+`asktest-dbx` run in DOSBox-X, and `asktest-bochs` in Bochs. The reference for `cmdtest` is the system's own shell:
 the output matches `COMMAND.COM` on MS-DOS line for line; FreeCOM differs only in how it
 echoes `FOR`. Every image is a copy: the FreeDOS download and your MS-DOS image are never
 written to.
@@ -151,9 +155,9 @@ The image this was developed against boots through its own MBR menu, so the head
 MS-DOS tests press `1` at it.
 
 ## How the network is set up
-QEMU's `ne2k_isa` (and DOSBox-X's `[ne2000]`) at port `0x300`, IRQ 10, with Crynwr's
-`NE2000.COM` packet driver on software interrupt `0x60`. Both emulators put the host at
-`10.0.2.2` on a user-mode network. The shell sends `Host:` without a port, as mTCP and
+QEMU's `ne2k_isa` (and DOSBox-X's `[ne2000]`, Bochs's `ne2k`) at port `0x300`, IRQ 10, with Crynwr's
+`NE2000.COM` packet driver on software interrupt `0x60`. All three emulators put the
+host at `10.0.2.2` on a user-mode network (Bochs's is slirp). The shell sends `Host:` without a port, as mTCP and
 ClauDOS do: claude-p-shim compares it exactly with its `SHIM_HOSTS` list. mTCP is on the
 images only to check the environment.
 
