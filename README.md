@@ -2,8 +2,8 @@
 
 `CLAUDE.COM`: a replacement for `COMMAND.COM`, written in NASM for 386 real mode, that
 runs on real DOS (FreeDOS and MS-DOS 6.22) and talks to Claude over its own TCP/IP stack.
-The sibling of ClauDOS: there everything under the shell was written from scratch; here
-DOS is real and only the shell is ours.
+The sibling of [ClauDOS](https://github.com/runa-tic/claudos): there everything under the
+shell was written from scratch; here DOS is real and only the shell is ours.
 
 ```
 C:\>which files are in the root directory
@@ -171,6 +171,9 @@ host at `10.0.2.2` on a user-mode network (Bochs's is slirp). The shell sends `H
 ClauDOS do: claude-p-shim compares it exactly with its `SHIM_HOSTS` list. mTCP is on the
 images only to check the environment.
 
-## Licences of what the build downloads
+## Licence
+MIT, see `LICENSE`.
+
+### What the build downloads
 FreeDOS 1.4, the Crynwr packet driver and mTCP are fetched at build time and are not
 redistributed here; each keeps its own licence (mTCP is GPL v3).
